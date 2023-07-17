@@ -22,19 +22,13 @@ def setup_logging():
 
 def main():
     setup_logging()
-    # settings = Settings(iperf3=dict(duration=15))
     settings = Settings()
 
     db = InfluxDBStorage(settings.influxdb)
 
     def write_iperf3_metrics():
         iperf3_metrics = wireless.get_iperf3_metrics(settings.iperf3)
-        pprint(iperf3_metrics.end.model_dump())
         db.write_data(iperf3_metrics)
-        # settings.iperf3.protocol="udp"
-        # iperf3_metrics = wireless.get_iperf3_metrics(settings.iperf3)
-        # pprint(iperf3_metrics.end.model_dump())
-        # db.write_data(iperf3_metrics)
 
     proc = Process(target=write_iperf3_metrics)
     proc.start()
