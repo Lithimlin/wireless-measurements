@@ -9,6 +9,7 @@ from pprint import pprint
 from wifi_info import wireless
 from wifi_info.settings import Settings
 from wifi_info.storage.influxdb import InfluxDBStorage
+from wifi_info.utils import InterfaceError
 
 
 def setup_logging():
@@ -39,8 +40,13 @@ def main():
     proc.start()
 
     while proc.is_alive():
-        wireless_metrics = wireless.get_wireless_metrics(settings.wireless_interface)
-        db.write_data(wireless_metrics)
+        try:
+            wireless_metrics = wireless.get_wireless_metrics(
+                settings.wireless_interface
+            )
+            db.write_data(wireless_metrics)
+        except InterfaceError as e:
+            logging.error(e)
         time.sleep(1)
 
 

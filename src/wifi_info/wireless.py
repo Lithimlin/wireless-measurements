@@ -1,13 +1,23 @@
 import logging
 from datetime import datetime, timedelta
 from ipaddress import IPv4Address
-from re import findall
+from re import findall, search
 from typing import Any, Optional, Sequence
 
 import iperf3  # type: ignore[import]
-from pydantic import (AliasPath, BaseModel, ByteSize, Field, SerializeAsAny,
-                      TypeAdapter, ValidationError, field_serializer,
-                      field_validator, model_serializer, model_validator)
+from pydantic import (
+    AliasPath,
+    BaseModel,
+    ByteSize,
+    Field,
+    SerializeAsAny,
+    TypeAdapter,
+    ValidationError,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from wifi_info import settings, utils
 
@@ -84,6 +94,11 @@ def get_wireless_metrics(
                 f"Unable to parse metric from wireless interface '{interface_name}'."
             ) from err
         return match
+
+    if search(r"type AP", output):
+        raise utils.InterfaceError(
+            f"Wireless interface '{interface_name}' is currently used as an access point. Cannot collect metrics."
+        )
 
     out_interface_name = parse_metric(output, r"(?<=Interface )(.*)")
     interface_mac_address = parse_metric(output, r"(?<=addr )(.*)")
@@ -208,10 +223,15 @@ class Iperf3Interval(BaseModel):
 
     def serialize_with_timestamp(self, basetime: datetime) -> dict[str, Any]:
         serialized = {
-            "streams": [stream.serialize_with_timestamp(basetime) for stream in self.streams],
-            "sum": self.sum.serialize_with_timestamp(basetime) if self.sum is not None else None,
+            "streams": [
+                stream.serialize_with_timestamp(basetime) for stream in self.streams
+            ],
+            "sum": self.sum.serialize_with_timestamp(basetime)
+            if self.sum is not None
+            else None,
         }
         return serialized
+
 
 class Iperf3EndStreams(BaseModel):
     """A model for an iperf3 end streams."""
@@ -256,7 +276,9 @@ class Iperf3End(BaseModel):
 
     def serialize_with_timestamp(self, basetime: datetime) -> dict[str, Any]:
         serialized = {
-            "streams": [stream.serialize_with_timestamp(basetime) for stream in self.streams],
+            "streams": [
+                stream.serialize_with_timestamp(basetime) for stream in self.streams
+            ],
             "sum_sent": self.sum_sent.serialize_with_timestamp(basetime),
             "sum_received": self.sum_received.serialize_with_timestamp(basetime),
         }
@@ -300,7 +322,10 @@ class Iperf3Metrics(BaseModel):
             ],
             "timestamp": self.timestamp,
             "settings": self.settings.model_dump(),
-            "intervals": [interval.serialize_with_timestamp(self.timestamp) for interval in self.intervals],
+            "intervals": [
+                interval.serialize_with_timestamp(self.timestamp)
+                for interval in self.intervals
+            ],
             "end": self.end.serialize_with_timestamp(self.timestamp),
         }
         return serialized
