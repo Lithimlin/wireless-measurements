@@ -83,15 +83,3 @@ class InterfaceSettings(BaseSettings):
     @property
     def ip_address(self) -> IPv4Address:
         return utils.get_interface_ipv4_address(self.name)
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_nested_delimiter="__",
-        extra="ignore",
-    )
-    iperf3: Iperf3Settings
-    influxdb: InfluxDBSettings
-    wireless_interface: InterfaceSettings
