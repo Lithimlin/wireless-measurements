@@ -23,7 +23,12 @@ class InfluxDBSettings(ServerSettings):
     port: int = Field(default=8086, exclude=True)
     org: str
     bucket: str
-    push_token: SecretStr = Field(..., validation_alias=AliasChoices("token", "push_token", "bucket_token"))
+    token: SecretStr = Field(
+        ...,
+        validation_alias=AliasChoices(
+            "token", "push_token", "query_token", "bucket_token"
+        ),
+    )
 
 
 class Iperf3Settings(ServerSettings):

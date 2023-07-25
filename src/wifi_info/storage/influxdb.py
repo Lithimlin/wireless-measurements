@@ -15,7 +15,7 @@ class InfluxDBStorage:
         self.settings = settings
         self.client = InfluxDBClient(
             url=settings.url,
-            token=settings.push_token.get_secret_value(),
+            token=settings.token.get_secret_value(),
             org=settings.org,
         )
         self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
