@@ -2,8 +2,15 @@ import logging
 from ipaddress import IPv4Address
 from typing import Literal, Optional
 
-from pydantic import (AliasChoices, Field, NonNegativeInt, SecretStr,
-                      computed_field, field_validator, model_serializer)
+from pydantic import (
+    AliasChoices,
+    Field,
+    NonNegativeInt,
+    SecretStr,
+    computed_field,
+    field_validator,
+    model_serializer,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from wifi_info import utils
@@ -79,7 +86,12 @@ class InterfaceSettings(BaseSettings):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', env_nested_delimiter='__', extra='ignore')
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        extra="ignore",
+    )
     iperf3: Iperf3Settings
     influxdb: InfluxDBSettings
     wireless_interface: InterfaceSettings
