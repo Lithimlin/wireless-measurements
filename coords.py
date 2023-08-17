@@ -199,6 +199,7 @@ def main():
 
     save_settings(settings, "paths.jsonc")
 
+    plt.tight_layout()
     plt.show()
 
 
