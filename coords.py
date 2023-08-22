@@ -270,10 +270,11 @@ def main():
 
     ordered_points = order_points(settings)
     filtered_points = ordered_points.drop(
-        lambda point: point.altitude == 3.0 and point.dlon > 100.0
+        # lambda point: point.altitude == 3.0 and point.dlon > 100.0
+        lambda _: False
     )
     plot_points_line(ax, filtered_points)
-    save_points(ordered_points, "points.jsonc")
+    save_points(filtered_points, "points.jsonc")
 
     # logger.info("Generating paths...")
     # settings = get_path_missions(
