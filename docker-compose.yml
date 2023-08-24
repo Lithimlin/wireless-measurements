@@ -14,6 +14,7 @@ services:
       - DOCKER_INFLUXDB_INIT_USERNAME
       - DOCKER_INFLUXDB_INIT_PASSWORD
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+    restart: unless-stopped
 
 volumes:
     influxdb-storage:
