@@ -1,6 +1,7 @@
 # Generated mission files
 *.json
 *.jsonc
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
