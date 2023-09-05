@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+
 import json
 import logging
 import sys
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from enum import StrEnum, auto
 from functools import cached_property
@@ -29,6 +31,57 @@ from scipy.interpolate import griddata  # type: ignore[import]
 from wifi_info.settings import InfluxDBSettings
 
 
+def addLoggingLevel(levelName, levelNum, methodName=None):
+    """
+    Comprehensively adds a new logging level to the `logging` module and the
+    currently configured logging class.
+
+    `levelName` becomes an attribute of the `logging` module with the value
+    `levelNum`. `methodName` becomes a convenience method for both `logging`
+    itself and the class returned by `logging.getLoggerClass()` (usually just
+    `logging.Logger`). If `methodName` is not specified, `levelName.lower()` is
+    used.
+
+    To avoid accidental clobberings of existing attributes, this method will
+    raise an `AttributeError` if the level name is already an attribute of the
+    `logging` module or if the method name is already present
+
+    Example
+    -------
+    >>> addLoggingLevel('TRACE', logging.DEBUG - 5)
+    >>> logging.getLogger(__name__).setLevel("TRACE")
+    >>> logging.getLogger(__name__).trace('that worked')
+    >>> logging.trace('so did this')
+    >>> logging.TRACE
+    5
+
+    """
+    if not methodName:
+        methodName = levelName.lower()
+
+    if hasattr(logging, levelName):
+        raise AttributeError("{} already defined in logging module".format(levelName))
+    if hasattr(logging, methodName):
+        raise AttributeError("{} already defined in logging module".format(methodName))
+    if hasattr(logging.getLoggerClass(), methodName):
+        raise AttributeError("{} already defined in logger class".format(methodName))
+
+    # This method was inspired by the answers to Stack Overflow post
+    # http://stackoverflow.com/q/2183233/2988730, especially
+    # http://stackoverflow.com/a/13638084/2988730
+    def logForLevel(self, message, *args, **kwargs):
+        if self.isEnabledFor(levelNum):
+            self._log(levelNum, message, args, **kwargs)
+
+    def logToRoot(message, *args, **kwargs):
+        logging.log(levelNum, message, *args, **kwargs)
+
+    logging.addLevelName(levelNum, levelName)
+    setattr(logging, levelName, levelNum)
+    setattr(logging.getLoggerClass(), methodName, logForLevel)
+    setattr(logging, methodName, logToRoot)
+
+
 def get_logger(level=logging.DEBUG) -> logging.Logger:
     """get a logger for the module with the given level
 
@@ -45,13 +98,15 @@ def get_logger(level=logging.DEBUG) -> logging.Logger:
     channel.setLevel(level)
 
     formatter = logging.Formatter(
-        "%(asctime)s %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        "%(asctime)s %(levelname)s: \t%(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
     channel.setFormatter(formatter)
     logger.addHandler(channel)
     return logger
 
 
+addLoggingLevel("VERBOSE", logging.DEBUG - 5)
 MODULE_LOGGER = get_logger(logging.DEBUG)
 
 
@@ -94,7 +149,7 @@ def build_influx_filters(tag: str, values: Sequence[str]) -> str:
     return f"|> filter(fn: (r) => {searches})"
 
 
-class PlotSettings(BaseSettings):
+class PlotSettings(BaseSettings, ABC):
     DEFAULT_DICT: ClassVar[dict[str, Any]] = dict()
     kwargs: dict[str, Any] = Field(default={}, required=False)
 
@@ -103,13 +158,19 @@ class PlotSettings(BaseSettings):
     def _validate_kwargs(cls, kwargs: dict[str, Any]) -> dict[str, Any]:
         return merge_dicts(cls.DEFAULT_DICT, kwargs)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        return data
+
     def plot(self, *args, **kwargs) -> None:
         raise NotImplementedError(
-            "The plotter of the base class was called but is not intended to be used"
+            f"Tried calling {__name__} method on {type(self).__name__} object"
         )
 
 
-class AxesSettings(BaseSettings):
+class AxesSettings(BaseSettings, ABC):
     title: Optional[str] = Field(default=None, required=False)
     xlabel: Optional[str] = Field(default=None, required=False)
     ylabel: Optional[str] = Field(default=None, required=False)
@@ -118,15 +179,19 @@ class AxesSettings(BaseSettings):
         default={}, required=False, description="additional kwargs for subplots"
     )
 
-    def validate_targets(self, *args, **kwargs) -> bool:
-        raise NotImplementedError(
-            "The validator of the base class was called but is not intended to be used"
-        )
+    @model_validator(mode="before")
+    @classmethod
+    def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        return data
 
+    @abstractmethod
+    def validate_targets(self, *args, **kwargs) -> bool:
+        pass
+
+    @abstractmethod
     def plot(self, *args, **kwargs) -> None:
-        raise NotImplementedError(
-            "The plotter of the base class was called but is not intended to be used"
-        )
+        pass
 
 
 class Plot2DType(StrEnum):
@@ -134,10 +199,7 @@ class Plot2DType(StrEnum):
 
 
 class Plot2DSettings(PlotSettings):
-    def plot(self, *args, **kwargs) -> None:
-        raise NotImplementedError(
-            "The plotter of the 2D base class was called but is not intended to be used"
-        )
+    pass
 
 
 class Line2DSettings(Plot2DSettings):
@@ -153,7 +215,7 @@ class Axes2DDefaults(AxesSettings):
 
     plots: dict[Plot2DType, Plots2DUnion] = {Plot2DType.LINE: Line2DSettings()}
 
-    @field_validator("plots")
+    @field_validator("plots", mode="before")
     @classmethod
     def _validate_plots(
         cls, data: dict[str, dict] | dict[Plot2DType, Plots2DUnion]
@@ -161,11 +223,6 @@ class Axes2DDefaults(AxesSettings):
         ret_data: dict[Plot2DType, Plots2DUnion] = {}
 
         for plot_type, plot_settings in data.items():
-            if plot_type not in Plot2DType:
-                raise ValueError(
-                    f"Plot type '{plot_type}' is not a valid plot type. "
-                    f"Must be one of {list(Plot2DType)}"
-                )
             plot_type = Plot2DType(plot_type)
 
             match plot_type:
@@ -175,7 +232,6 @@ class Axes2DDefaults(AxesSettings):
                     )
 
             ret_data[plot_type] = ret_settings
-
         return ret_data
 
     def validate_targets(self, values: list[str]) -> bool:
@@ -184,8 +240,24 @@ class Axes2DDefaults(AxesSettings):
                 raise ValueError(f"Plot target '{target}' must be a key of {values}")
         return True
 
+    def plot(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"Tried calling {__name__} method on {type(self).__name__} object"
+        )
+
 
 class Axes2DSettings(Axes2DDefaults):
+    DEFAULTS: ClassVar[Axes2DDefaults] = Axes2DDefaults()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
+        return data
+
     def plot(
         self,
         fig: plt.Figure,
@@ -206,9 +278,20 @@ class Axes2DSettings(Axes2DDefaults):
 
 
 class TwinAxes2DDefaults(Axes2DDefaults):
-    twin_targets: list[str]
+    DEFAULTS: ClassVar[Axes2DDefaults] = Axes2DDefaults()
+
+    twin_targets: list[str] = ["rssi"]
 
     ytwinlabel: Optional[str] = Field(default=None, required=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
+        return data
 
     def validate_targets(self, values: list[str]) -> bool:
         for target in self.twin_targets:
@@ -217,6 +300,11 @@ class TwinAxes2DDefaults(Axes2DDefaults):
                     f"Twin plot target '{target}' must be a key of {values}"
                 )
         return super(TwinAxes2DDefaults, self).validate_targets(values)
+
+    def plot(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"Tried calling {__name__} method on {type(self).__name__} object"
+        )
 
 
 class TwinAxes2DSettings(TwinAxes2DDefaults):
@@ -232,6 +320,7 @@ class TwinAxes2DSettings(TwinAxes2DDefaults):
 
         for plot_2d in self.plots.values():
             plot_2d.plot(ax_left, data[self.targets])
+        ax_right._get_lines.prop_cycler = ax_left._get_lines.prop_cycler
         for plot_2d in self.plots.values():
             plot_2d.plot(ax_right, data[self.twin_targets])
 
@@ -303,12 +392,25 @@ class Scatter3DSettings(Plot3DSettings):
         )
 
 
-class InterplolationSettings3D(BaseSettings):
+class InterpolationDefaults3D(BaseSettings):
     num_points: tuple[PositiveInt, PositiveInt, PositiveInt] = Field(
         default=(15, 15, 10),
         description="Number of interpolation points to plot in the lat, lon, and alt axes",
     )
     interpolation_method: str = Field(default="linear", required=False)
+
+
+class InterplolationSettings3D(InterpolationDefaults3D):
+    DEFAULTS: ClassVar[InterpolationDefaults3D] = InterpolationDefaults3D()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
+        return data
 
     def interpolate_data(
         self, geometry: gpd.GeoSeries, target_values: gpd.GeoSeries
@@ -350,11 +452,28 @@ class Interpolated3DSettings(Scatter3DSettings, InterplolationSettings3D):
         super(Interpolated3DSettings, self).plot(ax, data.geometry, data.target)
 
 
-class Contour3DSettings(Plot3DSettings, InterplolationSettings3D):
-    DEFAULT_DICT = dict(cmap="viridis")
-
+class Contour3DDefaults(Plot3DSettings, InterplolationSettings3D):
     number_contours: int = Field(default=5, required=False)
     limit_contours: list[int] | range = Field(default=[], required=False)
+
+    def plot(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"Tried calling {__name__} method on {type(self).__name__} object"
+        )
+
+
+class Contour3DSettings(Contour3DDefaults):
+    DEFAULT_DICT = dict(cmap="viridis")
+    DEFAULTS: ClassVar[Contour3DDefaults] = Contour3DDefaults()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
+        return data
 
     def plot(
         self,
@@ -405,18 +524,13 @@ class Axes3DDefaults(AxesSettings):
         Plot3DType.INTERPOLATED: Interpolated3DSettings()
     }
 
-    @field_validator("plots")
+    @field_validator("plots", mode="before")
     @classmethod
-    def _validate_plots(
+    def _parse_plots(
         cls, data: dict[str, dict] | dict[Plot3DType, Plots3DUnion]
     ) -> dict[Plot3DType, Plots3DUnion]:
         ret_data: dict[Plot3DType, Plots3DUnion] = {}
         for plot_type, plot_settings in data.items():
-            if plot_type not in Plot3DType:
-                raise ValueError(
-                    f"Plot type '{plot_type}' is not a valid plot type. "
-                    f"Must be one of {list(Plot3DType)}"
-                )
             plot_type = Plot3DType(plot_type)
             ret_settings: Plots3DUnion
             match plot_type:
@@ -443,7 +557,6 @@ class Axes3DDefaults(AxesSettings):
                 case _:
                     raise ValueError(f"Plot type {plot_type} not supported")
             ret_data[plot_type] = ret_settings
-
         return ret_data
 
     def validate_targets(self, values: list[str]) -> bool:
@@ -451,8 +564,24 @@ class Axes3DDefaults(AxesSettings):
             raise ValueError(f"Plot target '{self.target}' must be a key of {values}")
         return True
 
+    def plot(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"Tried calling {__name__} method on {type(self).__name__} object"
+        )
+
 
 class Axes3DSettings(Axes3DDefaults):
+    DEFAULTS: ClassVar[Axes3DDefaults] = Axes3DDefaults()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
+        return data
+
     def plot(
         self,
         fig: plt.Figure,
@@ -480,10 +609,14 @@ AxesUnion = Annotated[
 ]
 
 
+class AxesType(StrEnum):
+    Axes2D = "Axes2D"
+    TwinAxes2D = "TwinAxes2D"
+    Axes3D = "Axes3D"
+
+
 class FigureDefaults(BaseSettings):
-    subfigures: list[TwinAxes2DSettings | Axes2DSettings | Axes3DSettings] = [
-        Axes2DSettings()
-    ]
+    subfigures: list[AxesUnion] = [Axes2DSettings()]
     num_cols: PositiveInt = 1
     num_rows: PositiveInt = 1
 
@@ -496,6 +629,39 @@ class FigureDefaults(BaseSettings):
     kwargs: dict[str, Any] = Field(
         default={}, required=False, description="additional kwargs for figure"
     )
+
+    @field_validator("subfigures", mode="before")
+    @classmethod
+    def _parse_axes(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Parsing subfigures: {data}")
+        ret_data: list[AxesUnion] = []
+        for axes_settings in data:
+            if not isinstance(axes_settings, dict):
+                MODULE_LOGGER.verbose(
+                    f"Directly adding {type(axes_settings).__name__}({axes_settings.model_dump()}) to subfigures"
+                )
+                ret_data.append(axes_settings)
+                continue
+
+            axes_type = AxesType(axes_settings.pop("type"))
+            ret_settings: AxesUnion
+            match axes_type:
+                case AxesType.Axes2D:
+                    ret_settings = TypeAdapter(Axes2DSettings).validate_python(
+                        axes_settings
+                    )
+                case AxesType.TwinAxes2D:
+                    ret_settings = TypeAdapter(TwinAxes2DSettings).validate_python(
+                        axes_settings
+                    )
+                case AxesType.Axes3D:
+                    ret_settings = TypeAdapter(Axes3DSettings).validate_python(
+                        axes_settings
+                    )
+                case _:
+                    raise ValueError(f"Axes type {axes_type} not supported")
+            ret_data.append(ret_settings)
+        return ret_data
 
     @model_validator(mode="before")
     @classmethod
@@ -511,8 +677,16 @@ class FigureDefaults(BaseSettings):
             case {"subfigures": subfigures, "num_rows": num_rows}:
                 data["num_cols"] = int(np.ceil(len(subfigures) / num_rows))
             case {"subfigures": subfigures}:
-                data["num_cols"] = int(np.ceil(np.sqrt(len(subfigures))))
-                data["num_rows"] = int(np.ceil(len(subfigures) / data["num_cols"]))
+                data["num_cols"] = max(int(np.ceil(np.sqrt(len(subfigures)))), 1)
+                data["num_rows"] = max(
+                    int(np.ceil(len(subfigures) / data["num_cols"])), 1
+                )
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
         return data
 
     def validate_targets(self, values: list[str]) -> bool:
@@ -525,33 +699,27 @@ class FigureSettings(FigureDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        if "subfigures" not in data:
-            data["subfigures"] = cls.DEFAULTS.subfigures
-        if "num_cols" not in data:
-            data["num_cols"] = cls.DEFAULTS.num_cols
-        if "num_rows" not in data:
-            data["num_rows"] = cls.DEFAULTS.num_rows
-
-        if "title" not in data:
-            data["title"] = cls.DEFAULTS.title
-        if "xlabel" not in data:
-            data["xlabel"] = cls.DEFAULTS.xlabel
-        if "ylabel" not in data:
-            data["ylabel"] = cls.DEFAULTS.ylabel
-
-        if "tight_layout" not in data:
-            data["tight_layout"] = cls.DEFAULTS.tight_layout
-
-        if "kwargs" not in data:
-            data["kwargs"] = cls.DEFAULTS.kwargs
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
         return data
 
     def plot(self, data: gpd.GeoDataFrame) -> plt.Figure:
         fig = plt.figure(**self.kwargs)
         subplots = (self.num_rows, self.num_cols)
 
+        axes: list[plt.Axes | Axes3D] = []
+        axes3d: list[Axes3D] = []
         for i, subfigure in enumerate(self.subfigures):
-            subfigure.plot(fig, subplots, i + 1, data)
+            ax = subfigure.plot(fig, subplots, i + 1, data)
+            axes.append(ax)
+            if isinstance(subfigure, Axes3DSettings):
+                axes3d.append(ax)
+
+        # if len(axes3d) > 1:
+        #     for ax3d in axes3d[1:]:
+        #         axes3d[0].shareview(ax3d)
 
         if self.title:
             fig.suptitle(self.title)
@@ -581,6 +749,8 @@ class CorrelationCalcSettings(CorrelationCalcDefaults):
     """
     Settings for a correlation calculation.
     """
+
+    DEFAULTS: ClassVar[CorrelationCalcDefaults] = CorrelationCalcDefaults()
 
     def calculate(self, data: gpd.GeoDataFrame) -> pd.DataFrame:
         return data[self.targets].corr()
@@ -680,12 +850,18 @@ class ExperimentDefaults(BaseSettings):
     @model_validator(mode="after")  # type: ignore[arg-type]
     @classmethod
     def _validate_settings(cls, data: "ExperimentDefaults") -> "ExperimentDefaults":
-        MODULE_LOGGER.debug("Validating experiment settings")
+        MODULE_LOGGER.debug("Validating experiment targets...")
         for figure in data.figures:
             figure.validate_targets(data.eval_field_names)
         for corr in data.correlations:
             corr.validate_targets(data.eval_field_names)
 
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
         return data
 
 
@@ -701,26 +877,11 @@ class ExperimentSettings(ExperimentDefaults):
 
     @model_validator(mode="before")
     @classmethod
-    def _fill_model_defaults(cls, data: dict) -> dict:
-        MODULE_LOGGER.debug("Filling model defaults")
-
-        if "influxDB" not in data:
-            data["influxDB"] = cls.DEFAULTS.influxDB
-        if "gps_fields" not in data:
-            data["gps_fields"] = cls.DEFAULTS.gps_fields
-        if "extra_uav_fields" not in data:
-            data["extra_uav_fields"] = cls.DEFAULTS.extra_uav_fields
-        if "iperf_fields" not in data:
-            data["iperf_fields"] = cls.DEFAULTS.iperf_fields
-        if "wireless_fields" not in data:
-            data["wireless_fields"] = cls.DEFAULTS.wireless_fields
-        if "stream_types" not in data:
-            data["stream_types"] = cls.DEFAULTS.stream_types
-        if "figures" not in data:
-            data["figures"] = cls.DEFAULTS.figures
-        if "correlations" not in data:
-            data["correlations"] = cls.DEFAULTS.correlations
-
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
         return data
 
     def _get_offset_time(self, frame_type: FrameType) -> tuple[datetime, datetime]:
@@ -783,7 +944,7 @@ class ExperimentSettings(ExperimentDefaults):
 
     @staticmethod
     def _process_dataframe(data: pd.DataFrame) -> pd.DataFrame:
-        MODULE_LOGGER.debug("Processing dataframe\n%s", data.describe())
+        MODULE_LOGGER.verbose("Processing dataframe\n%s", data.describe())
         if data.empty:
             raise ValueError(
                 "DataFrame is empty. Perhaps incorrect filters were specified?"
@@ -869,12 +1030,153 @@ class ExperimentSettings(ExperimentDefaults):
         return geo_data
 
     def plot(self):
+        figs = []
         for figure in self.figures:
-            figure.plot(self.geo_data)
+            figs.append(figure.plot(self.geo_data))
+        return figs
 
     def calculate(self):
+        corrs = []
         for corr in self.correlations:
-            corr.calculate(self.geo_data)
+            corrs.append(corr.calculate(self.geo_data))
+        return corrs
+
+
+class EvaluationEnvelope(BaseSettings):
+    line2d_defaults: Line2DSettings = Field(default=Line2DSettings())
+    path3d_defaults: Path3DSettings = Field(default=Path3DSettings())
+    stem3d_defaults: Stem3DSettings = Field(default=Stem3DSettings())
+    scatter3d_defaults: Scatter3DSettings = Field(default=Scatter3DSettings())
+    interpolation3d_defaults: InterpolationDefaults3D = Field(
+        default=InterpolationDefaults3D()
+    )
+    interpolated3d_defaults: Interpolated3DSettings = Field(
+        default=Interpolated3DSettings()
+    )
+    contour3d_defaults: Contour3DDefaults = Field(default=Contour3DDefaults())
+
+    correlation_defaults: CorrelationCalcDefaults = Field(
+        default=CorrelationCalcDefaults()
+    )
+
+    axes3d_defaults: Axes3DDefaults = Field(default=Axes3DDefaults())
+    axes2d_defaults: Axes2DDefaults = Field(default=Axes2DDefaults())
+    twin_axes2d_defaults: TwinAxes2DDefaults = Field(default=TwinAxes2DDefaults())
+
+    figure_defaults: FigureDefaults = Field(default=FigureDefaults())
+
+    experiment_defaults: ExperimentDefaults = Field(
+        default=ExperimentDefaults(), alias="defaults"
+    )
+
+    experiments: list[ExperimentSettings]
+
+    @field_validator("experiment_defaults")
+    @classmethod
+    def _set_experiment_defaults(cls, value: ExperimentDefaults) -> ExperimentDefaults:
+        MODULE_LOGGER.debug("Setting experiment defaults")
+        ExperimentSettings.DEFAULTS = value
+        return value
+
+    @field_validator("correlation_defaults")
+    @classmethod
+    def _set_correlation_defaults(
+        cls, value: CorrelationCalcDefaults
+    ) -> CorrelationCalcDefaults:
+        MODULE_LOGGER.debug("Setting correlation calculation defaults")
+        CorrelationCalcSettings.DEFAULTS = value
+        return value
+
+    @field_validator("figure_defaults")
+    @classmethod
+    def _set_figure_defaults(cls, value: FigureDefaults) -> FigureDefaults:
+        MODULE_LOGGER.debug("Setting figure defaults")
+        FigureSettings.DEFAULTS = value
+        return value
+
+    @field_validator("axes3d_defaults")
+    @classmethod
+    def _set_axes3d_defaults(cls, value: Axes3DDefaults) -> Axes3DDefaults:
+        MODULE_LOGGER.debug("Setting axes3D defaults")
+        Axes3DSettings.DEFAULTS = value
+        return value
+
+    @field_validator("axes2d_defaults")
+    @classmethod
+    def _set_axes2d_defaults(cls, value: Axes2DDefaults) -> Axes2DDefaults:
+        MODULE_LOGGER.debug("Setting axes2D defaults")
+        Axes2DSettings.DEFAULTS = value
+        return value
+
+    @field_validator("twin_axes2d_defaults")
+    @classmethod
+    def _set_twin_axes2d_defaults(cls, value: TwinAxes2DDefaults) -> TwinAxes2DDefaults:
+        MODULE_LOGGER.debug("Setting twin axes2D defaults")
+        TwinAxes2DSettings.DEFAULTS = value
+        return value
+
+    @field_validator("line2d_defaults")
+    @classmethod
+    def _set_line2d_defaults(cls, value: Line2DSettings) -> Line2DSettings:
+        MODULE_LOGGER.debug("Setting line2D defaults")
+        Line2DSettings.DEFAULT_DICT = value.kwargs
+        return value
+
+    @field_validator("path3d_defaults")
+    @classmethod
+    def _set_path3d_defaults(cls, value: Path3DSettings) -> Path3DSettings:
+        MODULE_LOGGER.debug("Setting path3D defaults")
+        Path3DSettings.DEFAULT_DICT = value.kwargs
+        return value
+
+    @field_validator("stem3d_defaults")
+    @classmethod
+    def _set_stem3d_defaults(cls, value: Stem3DSettings) -> Stem3DSettings:
+        MODULE_LOGGER.debug("Setting stem3D defaults")
+        Stem3DSettings.DEFAULT_DICT = value.kwargs
+        return value
+
+    @field_validator("scatter3d_defaults")
+    @classmethod
+    def _set_scatter3d_defaults(cls, value: Scatter3DSettings) -> Scatter3DSettings:
+        MODULE_LOGGER.debug("Setting scatter3D defaults")
+        Scatter3DSettings.DEFAULT_DICT = value.kwargs
+        return value
+
+    @field_validator("interpolated3d_defaults")
+    @classmethod
+    def _set_interpolated3d_defaults(
+        cls, value: Interpolated3DSettings
+    ) -> Interpolated3DSettings:
+        MODULE_LOGGER.debug("Setting interpolated3D defaults")
+        Interpolated3DSettings.DEFAULTS = InterpolationDefaults3D(
+            num_points=value.num_points, interpolation_method=value.interpolation_method
+        )
+        Interpolated3DSettings.DEFAULT_DICT = value.kwargs
+        return value
+
+    @field_validator("interpolation3d_defaults")
+    @classmethod
+    def _set_interpolation3d_defaults(
+        cls, value: InterpolationDefaults3D
+    ) -> InterpolationDefaults3D:
+        MODULE_LOGGER.debug("Setting interpolation3D defaults")
+        InterplolationSettings3D.DEFAULTS = value
+        return value
+
+    @field_validator("contour3d_defaults")
+    @classmethod
+    def _set_contour3d_defaults(cls, value: Contour3DDefaults) -> Contour3DDefaults:
+        MODULE_LOGGER.debug("Setting contour3D defaults")
+        Contour3DSettings.DEFAULT_DICT = value.kwargs
+        Contour3DSettings.DEFAULTS = value
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        return data
 
 
 class EvaluationSettings(BaseSettings):
@@ -899,25 +1201,8 @@ class EvaluationSettings(BaseSettings):
         with open(self.experiments_file, "r", encoding="utf-8") as file:
             experiments_json = json.load(file)
 
-        if "defaults" in experiments_json:
-            ExperimentSettings.DEFAULTS = TypeAdapter(
-                ExperimentDefaults
-            ).validate_python(experiments_json["defaults"])
-        else:
-            ExperimentSettings.DEFAULTS = ExperimentDefaults()
-
-        if not "experiments" in experiments_json:
-            raise ValueError("No experiments found in experiments file")
-        experiments_dict = experiments_json["experiments"]
-
-        MODULE_LOGGER.debug(
-            "Loaded %d experiments from %s",
-            len(experiments_dict),
-            self.experiments_file,
-        )
-        experiments: list[ExperimentSettings] = TypeAdapter(
-            list[ExperimentSettings]
-        ).validate_python(experiments_dict)
+        envelope = TypeAdapter(EvaluationEnvelope).validate_python(experiments_json)
+        experiments = envelope.experiments
         MODULE_LOGGER.debug(experiments)
         return experiments
 
@@ -925,111 +1210,16 @@ class EvaluationSettings(BaseSettings):
 ####################################################################################################
 
 
-# def plot_with_offsets(
-#     settings: EvaluationSettings, start: int = -64600, end: int = -64500, step=10
-# ):
-#     offset_range = range(start, end + 1, step)
-#     num_plots = len(offset_range)
-
-#     aspect_shape = (4, 3)
-#     aspect_factor = num_plots / np.prod(aspect_shape)
-#     ncols = int(np.ceil(aspect_shape[0] * aspect_factor))
-#     nrows = int(np.ceil(aspect_shape[1] * aspect_factor))
-
-#     # prepare data plot
-#     fig, axes = plt.subplots(
-#         ncols=ncols, nrows=nrows, subplot_kw={"projection": "3d"}, figsize=(10, 10)
-#     )
-#     flat_axes = []
-#     if isinstance(axes, Axes3D):
-#         flat_axes.append(axes)
-#     else:
-#         flat_axes = axes.flatten()
-
-#     # get GeoDataFrame
-#     for ax, offset in zip(flat_axes, offset_range):
-#         t_offset = timedelta(seconds=offset)
-#         MODULE_LOGGER.info("Iteration start; Offset: %s seconds (%s)", offset, t_offset)
-#         gdf = get_geodata(settings, t_offset)
-
-#         # select only datapoints where the UAV is waiting
-#         gdf = gdf[gdf["mission_status"] == 2]
-
-#         if offset == offset_range[0]:
-#             MODULE_LOGGER.debug("Initial GeoDataFrame:")
-#             MODULE_LOGGER.debug(gdf.head())
-#             MODULE_LOGGER.info(
-#                 "Correlation of BPS and Signal Strength: %s",
-#                 gdf[["bps", "signal_strength"]].corr().loc["signal_strength", "bps"],
-#             )
-
-#         # Plot UAV path as stem
-#         # plot_path_stem(ax, gdf.geometry)
-
-#         # Plot UAV path
-#         plot_path(ax, gdf.geometry)
-
-#         # Plot target data
-#         plot_4d_data(ax, gdf.geometry, gdf[settings.plot_target])
-
-#         # Interpolate data
-#         # plot_interpolated_data(
-#         #     ax,
-#         #     gdf.geometry,
-#         #     gdf[settings.plot_target],
-#         #     nx=20,
-#         #     ny=20,
-#         #     nz=12,
-#         #     method="linear",
-#         #     alpha=0.6,
-#         # )
-
-#         # Plot contours
-#         # plot_4d_contours(
-#         #     ax,
-#         #     gdf.geometry,
-#         #     gdf[settings.plot_target],
-#         #     n_contours=2,
-#         #     nx=50,
-#         #     ny=50,
-#         #     nz=20,
-#         #     limit_contours=None,
-#         #     method="linear",
-#         # )
-
-#         ax.set_title(f"Offset: {t_offset}")
-
-#     fig.tight_layout()
-#     return fig
-
-
-# def plot_bps_ss_correlation(settings: EvaluationSettings):
-#     iperf_wireless_cols = ["bps", "signal_strength"]
-#     gdf = get_geodata(settings, timedelta(seconds=-64600)).loc[:, iperf_wireless_cols]
-#     MODULE_LOGGER.info("\n%s", gdf.head())
-
-#     fig, ax_left = plt.subplots()
-#     ax_right = ax_left.twinx()
-
-#     ax_left.plot(gdf["bps"], color="C0")
-#     ax_right.plot(gdf["signal_strength"], color="C21")
-#     ax_left.set_ylabel("Throughput (bps)")
-#     ax_right.set_ylabel("Signal Strength (dBm)")
-#     correlation = gdf.corr().loc["signal_strength", "bps"]
-#     ax_left.set_title(f"Correlation of BPS and Signal Strength: {correlation:.3f}")
-#     fig.tight_layout()
-
-
-####################################################################################################
-
-
 def main():
+    print("=================")
     sns.set_style("darkgrid")
+    sns.set_palette("colorblind")
     # Read settings
     eval_settings = EvaluationSettings()
     for experiment in eval_settings.experiments:
         experiment.plot()
-        print(experiment.calculate())
+        for result in experiment.calculate():
+            print(result)
 
     plt.show()
 
