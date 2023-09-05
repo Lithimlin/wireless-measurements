@@ -632,7 +632,7 @@ class FigureDefaults(BaseSettings):
 
     @field_validator("subfigures", mode="before")
     @classmethod
-    def _parse_axes(cls, data: dict[str, Any]) -> dict[str, Any]:
+    def _parse_axes(cls, data: list[dict | AxesUnion]) -> list[AxesUnion]:
         MODULE_LOGGER.debug(f"Parsing subfigures: {data}")
         ret_data: list[AxesUnion] = []
         for axes_settings in data:
