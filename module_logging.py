@@ -1,30 +1,27 @@
 import logging
 
 
-def addLoggingLevel(levelName, levelNum, methodName=None):
+def addLoggingLevel(levelName: str, levelNum: int, methodName: str | None = None):
     """
     Comprehensively adds a new logging level to the `logging` module and the
     currently configured logging class.
 
-    `levelName` becomes an attribute of the `logging` module with the value
-    `levelNum`. `methodName` becomes a convenience method for both `logging`
-    itself and the class returned by `logging.getLoggerClass()` (usually just
-    `logging.Logger`). If `methodName` is not specified, `levelName.lower()` is
-    used.
+    Args:
+        levelName (str): The name of the new level attribute of the `logging` module
+        levelNum (int): Determines the logging level of the attribute
+        methodName (str | None, optional): The name of the convenience method for logging on the new level.
+                        Defaults to the `levelName` in lower case.
 
-    To avoid accidental clobberings of existing attributes, this method will
-    raise an `AttributeError` if the level name is already an attribute of the
-    `logging` module or if the method name is already present
+    Raises:
+        AttributeError: Raised if `levelName` is already an attribute of the `logging` module. or if the method name is already present.
 
-    Example
-    -------
+    Examples:
     >>> addLoggingLevel('TRACE', logging.DEBUG - 5)
     >>> logging.getLogger(__name__).setLevel("TRACE")
     >>> logging.getLogger(__name__).trace('that worked')
     >>> logging.trace('so did this')
     >>> logging.TRACE
     5
-
     """
     if not methodName:
         methodName = levelName.lower()
