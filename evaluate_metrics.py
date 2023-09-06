@@ -47,7 +47,7 @@ def merge_dicts(dict_1: dict, dict_2: dict) -> dict:
     return {**dict_1, **dict_2}
 
 
-class InfluxDBConstants:
+class _InfluxDBConstants:
     QUERY_START = """from(bucket: "{bucket}")
     |> range(start: {start}, stop: {end})"""
     QUERY_END = (
@@ -59,13 +59,13 @@ def build_influx_query(
     bucket: str, start: datetime, end: datetime, filters: str
 ) -> str:
     return (
-        InfluxDBConstants.QUERY_START.format(
+        _InfluxDBConstants.QUERY_START.format(
             bucket=bucket,
             start=start.isoformat(),
             end=end.isoformat(),
         )
         + filters
-        + InfluxDBConstants.QUERY_END
+        + _InfluxDBConstants.QUERY_END
     )
 
 
