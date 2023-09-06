@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import json
-import logging
 import sys
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -31,8 +30,8 @@ from scipy.interpolate import griddata  # type: ignore[import]
 import module_logging
 from wifi_info.settings import InfluxDBSettings
 
-module_logging.addLoggingLevel("VERBOSE", logging.DEBUG - 5)
-MODULE_LOGGER = module_logging.get_logger(logging.DEBUG)
+module_logging.addLoggingLevel("VERBOSE", module_logging.logging.DEBUG - 5)
+MODULE_LOGGER = module_logging.get_logger(module_logging.logging.DEBUG)
 
 
 def floor_time(time: datetime) -> datetime:

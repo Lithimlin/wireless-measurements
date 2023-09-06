@@ -1,5 +1,4 @@
 import json
-import logging
 from itertools import groupby
 from typing import Any, Callable, Optional
 
@@ -9,20 +8,12 @@ import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
 from mpl_toolkits.mplot3d.axes3d import Axes3D  # type: ignore[import]
 from pydantic import BaseModel, Field, model_serializer
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from scipy.spatial import distance  # type: ignore[import]
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+import module_logging
 
-_handler = logging.StreamHandler()
-_handler.setLevel(logger.getEffectiveLevel())
-
-_formatter = logging.Formatter(
-    "%(asctime)s %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-)
-
-_handler.setFormatter(_formatter)
-logger.addHandler(_handler)
+MODULE_LOGGER = module_logging.get_logger(module_logging.logging.INFO)
 
 
 class MissionConfig(BaseModel):
@@ -74,7 +65,7 @@ class MissionPoints(BaseModel):
 
 
 def generate_circular_3d_points(config: MissionConfig) -> MissionPoints:
-    logger.debug(
+    MODULE_LOGGER.debug(
         f"Generating {config.numStops} point{'s' if config.numStops > 1 else ''} at radius {config.radius} and height {config.altitude}"
     )
     theta = np.linspace(0, 2 * np.pi, config.numStops, endpoint=False)
@@ -110,7 +101,7 @@ def calc_n_heights(
     arc_length = (end_angle - start_angle) * radius
 
     n_heights = int(np.round(arc_length / spacing))
-    logger.info(f"Generating {n_heights} heights")
+    MODULE_LOGGER.info(f"Generating {n_heights} heights")
 
     heights = np.linspace(min_height, max_height, n_heights, endpoint=True)
     return heights
@@ -130,7 +121,7 @@ def get_point_missions(
         v_spacing = r_spacing
 
     heights = calc_n_heights(radius, v_spacing, min_height, max_height)
-    logger.debug(f"Heights: {heights}")
+    MODULE_LOGGER.debug(f"Heights: {heights}")
 
     settings = MissionConfigs(missions=[])
 
@@ -169,7 +160,7 @@ def get_path_missions(
         v_spacing = r_spacing
 
     heights = calc_n_heights(radius, v_spacing, min_height, max_height)
-    logger.debug(f"Heights: {heights}")
+    MODULE_LOGGER.debug(f"Heights: {heights}")
 
     settings = MissionConfigs(missions=[])
 
@@ -229,15 +220,20 @@ def save_points(points: MissionPoints, filename: str) -> None:
         json.dump(points.model_dump(mode="json"), f, indent=2)
 
 
+class CoordSettings(BaseSettings):
+    pass
+
+
 def main():
     sns.set_style("darkgrid")
+    sns.set_palette("colorblind")
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10, 10))
 
-    radius = 250
-    r_spacing = 75
-    v_spacing = 50
-    min_height = 3
-    max_height = 150
+    radius = 70
+    r_spacing = 25
+    v_spacing = 20
+    min_height = 10
+    max_height = 70
 
     plot_reference_arcs(
         ax,
@@ -246,7 +242,7 @@ def main():
         linestyle=":",
     )
 
-    logger.info("Generating points...")
+    MODULE_LOGGER.info("Generating points...")
     settings = get_point_missions(
         radius=radius,
         r_spacing=r_spacing,
@@ -261,22 +257,21 @@ def main():
         all_points.extend(generate_circular_3d_points(mission))
         for mission in settings.missions
     ]
-    logger.info(f"Generated {len(all_points.points)} points")
+    MODULE_LOGGER.info(f"Generated {len(all_points.points)} points")
     distances = distance.pdist(all_points.to_ndarray())
-    logger.info(f"Min distance: {np.min(distances)}")
-    logger.debug(f"Mean distance: {np.mean(distances)}")
+    MODULE_LOGGER.info(f"Min distance: {np.min(distances)}")
+    MODULE_LOGGER.debug(f"Mean distance: {np.mean(distances)}")
 
     save_settings(settings, "missions.jsonc")
 
     ordered_points = order_points(settings)
     filtered_points = ordered_points.drop(
-        # lambda point: point.altitude == 3.0 and point.dlon > 100.0
-        lambda _: False
+        lambda point: 1.2 * point.dlon - 0.8 * point.dlat > 200.0
     )
     plot_points_line(ax, filtered_points)
     save_points(filtered_points, "points.jsonc")
 
-    # logger.info("Generating paths...")
+    # MODULE_LOGGER.info("Generating paths...")
     # settings = get_path_missions(
     #     radius=radius,
     #     r_spacing=r_spacing,
@@ -285,7 +280,7 @@ def main():
     #     max_height=max_height,
     # )
     # plot_path_missions(ax, settings)
-    # logger.info(f"Generated {len(settings.missions)} paths")
+    # MODULE_LOGGER.info(f"Generated {len(settings.missions)} paths")
 
     # save_settings(settings, "paths.jsonc")
 
