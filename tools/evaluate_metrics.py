@@ -11,6 +11,7 @@ from typing import Annotated, Any, ClassVar, Optional, Sequence
 
 import geopandas as gpd  # type: ignore[import]
 import matplotlib.pyplot as plt  # type: ignore[import]
+import module_logging
 import numpy as np
 import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
@@ -24,14 +25,18 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_json_source import JsonConfigSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 from scipy.interpolate import griddata  # type: ignore[import]
 
-import module_logging
 from wifi_info.settings import InfluxDBSettings
 
 module_logging.addLoggingLevel("VERBOSE", module_logging.logging.DEBUG - 5)
-MODULE_LOGGER = module_logging.get_logger(module_logging.logging.DEBUG)
+MODULE_LOGGER = module_logging.get_logger(module_logging.logging.VERBOSE)
 
 
 def floor_time(time: datetime) -> datetime:
@@ -971,6 +976,16 @@ class ExperimentSettings(ExperimentDefaults):
 
 
 class EvaluationEnvelope(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=("../.env", "../.env.eval", ".env", ".env.eval"),
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        env_prefix="EVAL_",
+        json_file="eval.json",
+        json_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     line2d_defaults: Line2DSettings = Field(default=Line2DSettings())
     path3d_defaults: Path3DSettings = Field(default=Path3DSettings())
     stem3d_defaults: Stem3DSettings = Field(default=Stem3DSettings())
@@ -993,11 +1008,25 @@ class EvaluationEnvelope(BaseSettings):
 
     figure_defaults: FigureDefaults = Field(default=FigureDefaults())
 
-    experiment_defaults: ExperimentDefaults = Field(
-        default=ExperimentDefaults(), alias="defaults"
-    )
+    experiment_defaults: ExperimentDefaults = Field(default=ExperimentDefaults())
 
     experiments: list[ExperimentSettings]
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            JsonConfigSettingsSource(settings_cls),
+            env_settings,
+            file_secret_settings,
+        )
 
     @field_validator("experiment_defaults")
     @classmethod
@@ -1107,34 +1136,6 @@ class EvaluationEnvelope(BaseSettings):
         return data
 
 
-class EvaluationSettings(BaseSettings):
-    """
-    Settings for the evaluation module.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=(".env", ".env.eval"),
-        env_file_encoding="utf-8",
-        env_nested_delimiter="__",
-        env_prefix="EVAL_",
-        extra="ignore",
-    )
-
-    influxDB: InfluxDBSettings
-    experiments_file: Path = Field(..., required=True)
-
-    @computed_field  # type: ignore[misc]
-    @cached_property
-    def experiments(self) -> list[ExperimentSettings]:
-        with open(self.experiments_file, "r", encoding="utf-8") as file:
-            experiments_json = json.load(file)
-
-        envelope = TypeAdapter(EvaluationEnvelope).validate_python(experiments_json)
-        experiments = envelope.experiments
-        MODULE_LOGGER.debug(experiments)
-        return experiments
-
-
 ####################################################################################################
 
 
@@ -1143,8 +1144,11 @@ def main():
     sns.set_style("darkgrid")
     sns.set_palette("colorblind")
     # Read settings
-    eval_settings = EvaluationSettings()
+    eval_settings = EvaluationEnvelope()
+    print(eval_settings)
+    print(ExperimentSettings.DEFAULTS)
     for experiment in eval_settings.experiments:
+        print(experiment)
         experiment.plot()
         for result in experiment.calculate():
             print(result)
