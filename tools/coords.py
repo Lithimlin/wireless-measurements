@@ -1,5 +1,6 @@
 import json
 from itertools import groupby
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 import matplotlib.pyplot as plt  # type: ignore[import]
@@ -8,7 +9,7 @@ import numpy as np
 import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
 from mpl_toolkits.mplot3d.axes3d import Axes3D  # type: ignore[import]
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
 from pydantic_json_source import JsonConfigSettingsSource
 from pydantic_settings import (
     BaseSettings,
@@ -17,7 +18,7 @@ from pydantic_settings import (
 )
 from scipy.spatial import distance  # type: ignore[import]
 
-MODULE_LOGGER = module_logging.get_logger(module_logging.logging.INFO)
+MODULE_LOGGER = module_logging.get_logger(module_logging.logging.DEBUG)
 
 
 class MissionConfig(BaseModel):
@@ -154,15 +155,9 @@ def get_path_missions(
     radius: float,
     r_spacing: float,
     min_height: float,
-    v_spacing: Optional[float] = None,
-    max_height: Optional[float] = None,
+    v_spacing: float,
+    max_height: float,
 ) -> MissionConfigs:
-    if max_height is None:
-        max_height = radius
-
-    if v_spacing is None:
-        v_spacing = r_spacing
-
     heights = calc_n_heights(radius, v_spacing, min_height, max_height)
     MODULE_LOGGER.debug(f"Heights: {heights}")
 
@@ -214,14 +209,13 @@ def plot_points_line(ax: Axes3D, points: MissionPoints, **kwargs) -> None:
     ax.plot(*points.to_ndarray().T, **kwargs)
 
 
-def save_settings(settings: MissionConfigs, filename: str) -> None:
-    with open(filename, "w") as f:
-        json.dump(settings.model_dump(mode="json"), f, indent=2)
+def store_model(data: MissionConfigs, filename: str) -> None:
+    path = Path(filename).expanduser()
+    MODULE_LOGGER.debug(f"Storing model to {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-
-def save_points(points: MissionPoints, filename: str) -> None:
-    with open(filename, "w") as f:
-        json.dump(points.model_dump(mode="json"), f, indent=2)
+    with open(path, "w") as f:
+        json.dump(data.model_dump(mode="json"), f, indent=2)
 
 
 class CoordSettings(BaseSettings):
@@ -233,17 +227,27 @@ class CoordSettings(BaseSettings):
         json_file="coords.json",
         json_file_encoding="utf-8",
         extra="ignore",
-    )
+    )  # type: ignore[typeddict-unknown-key]
 
-    radius: float = Field(..., ge=0.0)
+    radius: float = Field(default=100.0, ge=0.0)
     r_spacing: float = Field(
-        ..., gt=0.0, description="The radial spacing between points"
+        default=25.0,
+        gt=0.0,
+        description="The radial spacing between points. If `v_spacing` is not specified, it will be the same as this.",
     )
-    v_spacing: float = Field(
-        ..., gt=0.0, description="The vertical spacing between points"
+    v_spacing: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        description="The vertical spacing between points",
     )
-    min_height: float = Field(..., ge=0.0)
-    max_height: float = Field(..., gt=0.0)
+    min_height: float = Field(
+        default=0.0,
+        ge=0.0,
+    )
+    max_height: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+    )
 
     generate_missions: bool = Field(
         False,
@@ -257,6 +261,14 @@ class CoordSettings(BaseSettings):
         False,
         description="Whether to generate all missions as paths for HotPointMissions",
     )
+
+    @model_validator(mode="after")
+    def _model_validator(self) -> "CoordSettings":
+        if self.v_spacing is None:
+            self.v_spacing = self.r_spacing
+
+        if self.max_height is None:
+            self.max_height = self.radius
 
     @classmethod
     def settings_customise_sources(
@@ -307,7 +319,7 @@ def generate_missions_points(
 
     if store_missions:
         MODULE_LOGGER.info("Storing missions...")
-        save_settings(mission_configs, "missions.jsonc")
+        store_model(mission_configs, "../output/missions.jsonc")
 
     if not store_points:
         return
@@ -318,7 +330,7 @@ def generate_missions_points(
     )
     plot_points_line(ax, filtered_points)
     MODULE_LOGGER.info("Storing points...")
-    save_points(filtered_points, "points.jsonc")
+    store_model(filtered_points, "../output/points.jsonc")
 
 
 def generate_paths(
@@ -340,10 +352,28 @@ def generate_paths(
     plot_path_missions(ax, mission_configs)
     MODULE_LOGGER.info(f"Generated {len(mission_configs.missions)} paths")
 
-    save_settings(mission_configs, "paths.jsonc")
+    store_model(mission_configs, "../output/paths.jsonc")
+
+
+def generate_template_file() -> None:
+    model_config = CoordSettings.model_config
+    CoordSettings.model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+
+    MODULE_LOGGER.info("Generating template file...")
+    settings = CoordSettings()
+
+    path = Path(__file__).parent / "coords.json.template"
+    with open(path, "w") as file:
+        json.dump(settings.model_dump(mode="json"), file, indent=2)
+
+    CoordSettings.model_config = model_config
 
 
 def main():
+    generate_template_file()
+
     sns.set_style("darkgrid")
     sns.set_palette("colorblind")
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10, 10))

@@ -1,0 +1,327 @@
+{
+  "line2d_defaults": {
+    "kwargs": {}
+  },
+  "path3d_defaults": {
+    "kwargs": {
+      "color": "grey",
+      "linestyle": ":"
+    }
+  },
+  "stem3d_defaults": {
+    "kwargs": {
+      "markerfmt": ".",
+      "linefmt": "C7:"
+    }
+  },
+  "scatter3d_defaults": {
+    "kwargs": {
+      "cmap": "viridis"
+    }
+  },
+  "interpolation3d_defaults": {
+    "num_points": [
+      15,
+      15,
+      10
+    ],
+    "interpolation_method": "linear"
+  },
+  "interpolated3d_defaults": {
+    "num_points": [
+      15,
+      15,
+      10
+    ],
+    "interpolation_method": "linear",
+    "kwargs": {
+      "cmap": "viridis"
+    }
+  },
+  "contour3d_defaults": {
+    "num_points": [
+      15,
+      15,
+      10
+    ],
+    "interpolation_method": "linear",
+    "kwargs": {},
+    "number_contours": 5,
+    "limit_contours": []
+  },
+  "correlation_defaults": {
+    "targets": [
+      "bps",
+      "rssi"
+    ]
+  },
+  "axes3d_defaults": {
+    "title": null,
+    "xlabel": null,
+    "ylabel": null,
+    "kwargs": {},
+    "target": "bps",
+    "crs_target": null,
+    "zlabel": null,
+    "plots": {
+      "interpolated": {
+        "num_points": [
+          15,
+          15,
+          10
+        ],
+        "interpolation_method": "linear",
+        "kwargs": {
+          "cmap": "viridis"
+        }
+      }
+    }
+  },
+  "axes2d_defaults": {
+    "title": null,
+    "xlabel": null,
+    "ylabel": null,
+    "kwargs": {},
+    "targets": [
+      "bps"
+    ],
+    "plots": {
+      "line": {
+        "kwargs": {}
+      }
+    }
+  },
+  "twin_axes2d_defaults": {
+    "title": null,
+    "xlabel": null,
+    "ylabel": null,
+    "kwargs": {},
+    "targets": [
+      "bps"
+    ],
+    "plots": {
+      "line": {
+        "kwargs": {}
+      }
+    },
+    "twin_targets": [
+      "rssi"
+    ],
+    "ytwinlabel": null
+  },
+  "figure_defaults": {
+    "subfigures": [
+      {
+        "title": null,
+        "xlabel": null,
+        "ylabel": null,
+        "kwargs": {},
+        "targets": [
+          "bps"
+        ],
+        "plots": {
+          "line": {
+            "kwargs": {}
+          }
+        }
+      }
+    ],
+    "num_cols": 1,
+    "num_rows": 1,
+    "title": "",
+    "xlabel": "",
+    "ylabel": "",
+    "tight_layout": true,
+    "kwargs": {}
+  },
+  "experiment_defaults": {
+    "retrieval_offsets": {},
+    "offset_range": {
+      "start": 0,
+      "end": 0,
+      "step": 1
+    },
+    "influxDB": {
+      "org": "my-org",
+      "bucket": "my-bucket",
+      "token": "**********",
+      "url": "127.0.0.1:8086"
+    },
+    "gps_fields": {
+      "lat": "rtk_lat",
+      "lon": "rtk_lon",
+      "alt": "rtk_height_from_sea"
+    },
+    "extra_uav_fields": {},
+    "iperf_fields": {
+      "bps": "bits_per_second"
+    },
+    "wireless_fields": {
+      "rssi": "signal_strength"
+    },
+    "stream_types": [
+      "interval sum"
+    ],
+    "figures": [
+      {
+        "subfigures": [
+          {
+            "title": null,
+            "xlabel": null,
+            "ylabel": null,
+            "kwargs": {},
+            "targets": [
+              "bps"
+            ],
+            "plots": {
+              "line": {
+                "kwargs": {}
+              }
+            }
+          }
+        ],
+        "num_cols": 1,
+        "num_rows": 1,
+        "title": "",
+        "xlabel": "",
+        "ylabel": "",
+        "tight_layout": true,
+        "kwargs": {}
+      },
+      {
+        "subfigures": [
+          {
+            "title": null,
+            "xlabel": null,
+            "ylabel": null,
+            "kwargs": {},
+            "target": "bps",
+            "crs_target": null,
+            "zlabel": null,
+            "plots": {
+              "interpolated": {
+                "num_points": [
+                  15,
+                  15,
+                  10
+                ],
+                "interpolation_method": "linear",
+                "kwargs": {
+                  "cmap": "viridis"
+                }
+              }
+            }
+          }
+        ],
+        "num_cols": 1,
+        "num_rows": 1,
+        "title": "",
+        "xlabel": "",
+        "ylabel": "",
+        "tight_layout": true,
+        "kwargs": {}
+      }
+    ],
+    "correlations": [],
+    "crs_target": null
+  },
+  "experiments": [
+    {
+      "retrieval_offsets": {
+        "iperf": "-PT200S",
+        "wireless": "PT150S",
+        "uav": "PT7200S"
+      },
+      "offset_range": {
+        "start": 0,
+        "end": 0,
+        "step": 1
+      },
+      "influxDB": {
+        "org": "my-org",
+        "bucket": "my-bucket",
+        "token": "**********",
+        "url": "127.0.0.1:8086"
+      },
+      "gps_fields": {
+        "lat": "rtk_lat",
+        "lon": "rtk_lon",
+        "alt": "rtk_height_from_sea"
+      },
+      "extra_uav_fields": {},
+      "iperf_fields": {
+        "bps": "bits_per_second"
+      },
+      "wireless_fields": {
+        "rssi": "signal_strength"
+      },
+      "stream_types": [
+        "interval sum"
+      ],
+      "figures": [
+        {
+          "subfigures": [
+            {
+              "title": null,
+              "xlabel": null,
+              "ylabel": null,
+              "kwargs": {},
+              "targets": [
+                "bps"
+              ],
+              "plots": {
+                "line": {
+                  "kwargs": {}
+                }
+              }
+            }
+          ],
+          "num_cols": 1,
+          "num_rows": 1,
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "tight_layout": true,
+          "kwargs": {}
+        },
+        {
+          "subfigures": [
+            {
+              "title": null,
+              "xlabel": null,
+              "ylabel": null,
+              "kwargs": {},
+              "target": "bps",
+              "crs_target": null,
+              "zlabel": null,
+              "plots": {
+                "interpolated": {
+                  "num_points": [
+                    15,
+                    15,
+                    10
+                  ],
+                  "interpolation_method": "linear",
+                  "kwargs": {
+                    "cmap": "viridis"
+                  }
+                }
+              }
+            }
+          ],
+          "num_cols": 1,
+          "num_rows": 1,
+          "title": "",
+          "xlabel": "",
+          "ylabel": "",
+          "tight_layout": true,
+          "kwargs": {}
+        }
+      ],
+      "correlations": [],
+      "crs_target": null,
+      "start": "2023-09-06T18:22:15.974712",
+      "end": "2023-09-06T18:22:15.974714"
+    }
+  ]
+}

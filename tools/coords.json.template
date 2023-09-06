@@ -1,0 +1,10 @@
+{
+  "radius": 100.0,
+  "r_spacing": 25.0,
+  "v_spacing": 25.0,
+  "min_height": 0.0,
+  "max_height": 100.0,
+  "generate_missions": false,
+  "generate_points": false,
+  "generate_paths": false
+}

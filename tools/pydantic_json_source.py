@@ -17,7 +17,11 @@ class JsonConfigSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(
         self, field: FieldInfo, field_name: str
     ) -> tuple[Any, str, bool]:
-        path = Path(self.config.get("json_file")).expanduser()
+        if self.config.get("json_file") is None:
+            return None, "", False
+
+        here = Path(__file__).parent
+        path = here / Path(self.config.get("json_file"))
         encoding = self.config.get("json_file_encoding")
 
         if not path.is_file():

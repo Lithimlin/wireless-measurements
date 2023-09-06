@@ -22,6 +22,7 @@ from pydantic import (
     PositiveInt,
     TypeAdapter,
     computed_field,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -36,7 +37,7 @@ from scipy.interpolate import griddata  # type: ignore[import]
 from wifi_info.settings import InfluxDBSettings
 
 module_logging.addLoggingLevel("VERBOSE", module_logging.logging.DEBUG - 5)
-MODULE_LOGGER = module_logging.get_logger(module_logging.logging.VERBOSE)
+MODULE_LOGGER = module_logging.get_logger(module_logging.logging.INFO)
 
 
 def floor_time(time: datetime) -> datetime:
@@ -385,6 +386,11 @@ class Contour3DDefaults(Plot3DSettings, InterplolationSettings3D):
     number_contours: int = Field(default=5, required=False)
     limit_contours: list[int] | range = Field(default=[], required=False)
 
+    @field_serializer("limit_contours")
+    @classmethod
+    def _validate_limit_contours(cls, limit_contours: list[int] | range) -> list[int]:
+        return list(limit_contours)
+
     def plot(self, *args, **kwargs) -> None:
         raise NotImplementedError(
             f"Tried calling {__name__} method on {type(self).__name__} object"
@@ -702,7 +708,7 @@ class FrameType(StrEnum):
 
 class ExperimentDefaults(BaseSettings):
     retrieval_offsets: dict[FrameType, timedelta] = Field(default={}, required=False)
-    offset_range: range | dict[str, int] = Field(default=range(0, 0), required=False)
+    offset_range: range = Field(default=range(0, 0), required=False)
 
     influxDB: InfluxDBSettings = Field(
         default=InfluxDBSettings(
@@ -748,7 +754,7 @@ class ExperimentDefaults(BaseSettings):
 
     crs_target: Optional[str] = Field(default=None, required=False)
 
-    @field_validator("offset_range")
+    @field_validator("offset_range", mode="before")
     @classmethod
     def _validate_offset_range(cls, data: dict[str, int] | range) -> range:
         if isinstance(data, range):
@@ -759,6 +765,14 @@ class ExperimentDefaults(BaseSettings):
         if "step" not in data:
             data["step"] = 1
         return range(data["start"], data["end"], data["step"])
+
+    @field_serializer("offset_range")
+    def _serialize_offset_range(self, value: range) -> dict[str, int]:
+        return {
+            "start": value.start,
+            "end": value.stop,
+            "step": value.step,
+        }
 
     @property
     def eval_field_names(self) -> list[str]:
@@ -984,7 +998,7 @@ class EvaluationEnvelope(BaseSettings):
         json_file="eval.json",
         json_file_encoding="utf-8",
         extra="ignore",
-    )
+    )  # type: ignore[typeddict-unknown-key]
 
     line2d_defaults: Line2DSettings = Field(default=Line2DSettings())
     path3d_defaults: Path3DSettings = Field(default=Path3DSettings())
@@ -1136,19 +1150,45 @@ class EvaluationEnvelope(BaseSettings):
         return data
 
 
+def generate_template_file() -> None:
+    model_config = EvaluationEnvelope.model_config
+    EvaluationEnvelope.model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+
+    MODULE_LOGGER.info("Generating template files...")
+    eval_settings = EvaluationEnvelope(
+        experiments=[
+            ExperimentSettings(
+                start=datetime.now(),
+                end=datetime.now(),
+                retrieval_offsets={
+                    FrameType.IPERF: timedelta(seconds=-200),
+                    FrameType.WIRELESS: timedelta(seconds=150),
+                    FrameType.UAV: timedelta(hours=2),
+                },
+            )
+        ]
+    )
+    path = Path(__file__).parent / "eval.json.template"
+    with open(path, "w") as file:
+        json.dump(eval_settings.model_dump(mode="json"), file, indent=2)
+
+    EvaluationEnvelope.model_config = model_config
+
+
 ####################################################################################################
 
 
 def main():
-    print("=================")
+    generate_template_file()
+
+    MODULE_LOGGER.info("Start evaluation...")
     sns.set_style("darkgrid")
     sns.set_palette("colorblind")
     # Read settings
     eval_settings = EvaluationEnvelope()
-    print(eval_settings)
-    print(ExperimentSettings.DEFAULTS)
     for experiment in eval_settings.experiments:
-        print(experiment)
         experiment.plot()
         for result in experiment.calculate():
             print(result)
