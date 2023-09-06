@@ -699,9 +699,14 @@ class FigureSettings(FigureDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        cls._validate_figure_settings(data)
         MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
+                data[field] = getattr(cls.DEFAULTS, field)
+            if field in ["num_cols", "num_rows"] and data[field] < getattr(
+                cls.DEFAULTS, field
+            ):
                 data[field] = getattr(cls.DEFAULTS, field)
         return data
 
@@ -848,15 +853,14 @@ class ExperimentDefaults(BaseSettings):
         return data
 
     @model_validator(mode="after")  # type: ignore[arg-type]
-    @classmethod
-    def _validate_settings(cls, data: "ExperimentDefaults") -> "ExperimentDefaults":
+    def _validate_settings(self) -> "ExperimentDefaults":
         MODULE_LOGGER.debug("Validating experiment targets...")
-        for figure in data.figures:
-            figure.validate_targets(data.eval_field_names)
-        for corr in data.correlations:
-            corr.validate_targets(data.eval_field_names)
+        for figure in self.figures:
+            figure.validate_targets(self.eval_field_names)
+        for corr in self.correlations:
+            corr.validate_targets(self.eval_field_names)
 
-        return data
+        return self
 
     @model_validator(mode="before")
     @classmethod
