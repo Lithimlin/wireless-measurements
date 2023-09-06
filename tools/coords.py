@@ -3,15 +3,19 @@ from itertools import groupby
 from typing import Any, Callable, Optional
 
 import matplotlib.pyplot as plt  # type: ignore[import]
+import module_logging
 import numpy as np
 import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
 from mpl_toolkits.mplot3d.axes3d import Axes3D  # type: ignore[import]
 from pydantic import BaseModel, Field, model_serializer
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_json_source import JsonConfigSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 from scipy.spatial import distance  # type: ignore[import]
-
-import module_logging
 
 MODULE_LOGGER = module_logging.get_logger(module_logging.logging.INFO)
 
@@ -221,7 +225,122 @@ def save_points(points: MissionPoints, filename: str) -> None:
 
 
 class CoordSettings(BaseSettings):
-    pass
+    model_config = SettingsConfigDict(
+        env_file=("../.env", "../.env.coords", ".env", ".env.coords"),
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        env_prefix="COORDS_",
+        json_file="coords.json",
+        json_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    radius: float = Field(..., ge=0.0)
+    r_spacing: float = Field(
+        ..., gt=0.0, description="The radial spacing between points"
+    )
+    v_spacing: float = Field(
+        ..., gt=0.0, description="The vertical spacing between points"
+    )
+    min_height: float = Field(..., ge=0.0)
+    max_height: float = Field(..., gt=0.0)
+
+    generate_missions: bool = Field(
+        False,
+        description="Whether to generate seperate missions for each radius and height",
+    )
+    generate_points: bool = Field(
+        False,
+        description="Whether to generate all missions as points on a path in a single missions",
+    )
+    generate_paths: bool = Field(
+        False,
+        description="Whether to generate all missions as paths for HotPointMissions",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            JsonConfigSettingsSource(settings_cls),
+            env_settings,
+            file_secret_settings,
+        )
+
+
+def generate_missions_points(
+    ax: plt.Axes,
+    radius: float,
+    r_spacing: float,
+    v_spacing: float,
+    min_height: float,
+    max_height: float,
+    store_missions: bool,
+    store_points: bool,
+) -> None:
+    MODULE_LOGGER.info("Generating points...")
+    mission_configs = get_point_missions(
+        radius=radius,
+        r_spacing=r_spacing,
+        v_spacing=v_spacing,
+        min_height=min_height,
+        max_height=max_height,
+    )
+    plot_point_missions(ax, mission_configs)
+
+    all_points = MissionPoints(points=[])
+    [
+        all_points.extend(generate_circular_3d_points(mission))
+        for mission in mission_configs.missions
+    ]
+    MODULE_LOGGER.info(f"Generated {len(all_points.points)} points")
+    distances = distance.pdist(all_points.to_ndarray())
+    MODULE_LOGGER.info(f"Min distance: {np.min(distances)}")
+    MODULE_LOGGER.debug(f"Mean distance: {np.mean(distances)}")
+
+    if store_missions:
+        MODULE_LOGGER.info("Storing missions...")
+        save_settings(mission_configs, "missions.jsonc")
+
+    if not store_points:
+        return
+
+    ordered_points = order_points(mission_configs)
+    filtered_points = ordered_points.drop(
+        lambda point: 1.2 * point.dlon - 0.8 * point.dlat > 200.0
+    )
+    plot_points_line(ax, filtered_points)
+    MODULE_LOGGER.info("Storing points...")
+    save_points(filtered_points, "points.jsonc")
+
+
+def generate_paths(
+    ax: plt.Axes,
+    radius: float,
+    r_spacing: float,
+    v_spacing: float,
+    min_height: float,
+    max_height: float,
+) -> None:
+    MODULE_LOGGER.info("Generating paths...")
+    mission_configs = get_path_missions(
+        radius=radius,
+        r_spacing=r_spacing,
+        v_spacing=v_spacing,
+        min_height=min_height,
+        max_height=max_height,
+    )
+    plot_path_missions(ax, mission_configs)
+    MODULE_LOGGER.info(f"Generated {len(mission_configs.missions)} paths")
+
+    save_settings(mission_configs, "paths.jsonc")
 
 
 def main():
@@ -229,60 +348,36 @@ def main():
     sns.set_palette("colorblind")
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10, 10))
 
-    radius = 70
-    r_spacing = 25
-    v_spacing = 20
-    min_height = 10
-    max_height = 70
+    settings = CoordSettings()
 
     plot_reference_arcs(
         ax,
-        radius=radius,
+        radius=settings.radius,
         color="gray",
         linestyle=":",
     )
 
-    MODULE_LOGGER.info("Generating points...")
-    settings = get_point_missions(
-        radius=radius,
-        r_spacing=r_spacing,
-        v_spacing=v_spacing,
-        min_height=min_height,
-        max_height=max_height,
-    )
-    plot_point_missions(ax, settings)
+    if settings.generate_missions or settings.generate_points:
+        generate_missions_points(
+            ax=ax,
+            radius=settings.radius,
+            r_spacing=settings.r_spacing,
+            v_spacing=settings.v_spacing,
+            min_height=settings.min_height,
+            max_height=settings.max_height,
+            store_missions=settings.generate_missions,
+            store_points=settings.generate_points,
+        )
 
-    all_points = MissionPoints(points=[])
-    [
-        all_points.extend(generate_circular_3d_points(mission))
-        for mission in settings.missions
-    ]
-    MODULE_LOGGER.info(f"Generated {len(all_points.points)} points")
-    distances = distance.pdist(all_points.to_ndarray())
-    MODULE_LOGGER.info(f"Min distance: {np.min(distances)}")
-    MODULE_LOGGER.debug(f"Mean distance: {np.mean(distances)}")
-
-    save_settings(settings, "missions.jsonc")
-
-    ordered_points = order_points(settings)
-    filtered_points = ordered_points.drop(
-        lambda point: 1.2 * point.dlon - 0.8 * point.dlat > 200.0
-    )
-    plot_points_line(ax, filtered_points)
-    save_points(filtered_points, "points.jsonc")
-
-    # MODULE_LOGGER.info("Generating paths...")
-    # settings = get_path_missions(
-    #     radius=radius,
-    #     r_spacing=r_spacing,
-    #     v_spacing=v_spacing,
-    #     min_height=min_height,
-    #     max_height=max_height,
-    # )
-    # plot_path_missions(ax, settings)
-    # MODULE_LOGGER.info(f"Generated {len(settings.missions)} paths")
-
-    # save_settings(settings, "paths.jsonc")
+    if settings.generate_paths:
+        generate_paths(
+            ax=ax,
+            radius=settings.radius,
+            r_spacing=settings.r_spacing,
+            v_spacing=settings.v_spacing,
+            min_height=settings.min_height,
+            max_height=settings.max_height,
+        )
 
     plt.tight_layout()
     plt.show()
