@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 from enum import StrEnum, auto
 from functools import cached_property
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Optional, Sequence
+from typing import Annotated, Any, ClassVar, Optional
+from zoneinfo import ZoneInfo
 
 import geopandas as gpd  # type: ignore[import]
 import matplotlib.pyplot as plt  # type: ignore[import]
@@ -804,6 +805,10 @@ class ExperimentSettings(ExperimentDefaults):
                 data[field] = getattr(cls.DEFAULTS, field)
         return data
 
+    @field_serializer("start", "end")
+    def _serialize_start_end(self, value: datetime) -> str:
+        return value.strftime("%Y-%m-%dT%H:%M:%S%z")
+
     def _get_offset_time(self, frame_type: FrameType) -> tuple[datetime, datetime]:
         start = self.start
         end = self.end
@@ -823,7 +828,7 @@ class ExperimentSettings(ExperimentDefaults):
             end,
             f"""
             {InfluxDBSettings.build_filters("_measurement", ["drone_metrics"])}
-            {InfluxDBSettings.build_filters("_field", list(self.uav_fields.values()))}""",
+            {InfluxDBSettings.build_filters("_field", self.uav_fields.values())}""",
         )
 
     @property
@@ -835,7 +840,7 @@ class ExperimentSettings(ExperimentDefaults):
             end,
             f"""
             {InfluxDBSettings.build_filters("_measurement", ["iperf3"])}
-            {InfluxDBSettings.build_filters("_field", list(self.iperf_fields.values()))}
+            {InfluxDBSettings.build_filters("_field", self.iperf_fields.values())}
             {InfluxDBSettings.build_filters("type", self.stream_types)}""",
         )
 
@@ -848,7 +853,7 @@ class ExperimentSettings(ExperimentDefaults):
             end,
             f"""
             {InfluxDBSettings.build_filters("_measurement", ["wireless"])}
-            {InfluxDBSettings.build_filters("_field", list(self.wireless_fields.values()))}""",
+            {InfluxDBSettings.build_filters("_field", self.wireless_fields.values())}""",
         )
 
     @staticmethod
@@ -866,6 +871,7 @@ class ExperimentSettings(ExperimentDefaults):
         return data
 
     def _get_uav_data(self) -> pd.DataFrame:
+        MODULE_LOGGER.debug("UAV query: %s", self.uav_query)
         data = self.influxDB.query_data_frame(self.uav_query)
         if FrameType.UAV in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
@@ -876,6 +882,7 @@ class ExperimentSettings(ExperimentDefaults):
         return data
 
     def _get_iperf_data(self) -> pd.DataFrame:
+        MODULE_LOGGER.debug("Iperf query: %s", self.iperf_query)
         data = self.influxDB.query_data_frame(self.iperf_query)
         if FrameType.IPERF in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
@@ -886,6 +893,7 @@ class ExperimentSettings(ExperimentDefaults):
         return data
 
     def _get_wireless_data(self) -> pd.DataFrame:
+        MODULE_LOGGER.debug("Wireless query: %s", self.wireless_query)
         data = self.influxDB.query_data_frame(self.wireless_query)
         if FrameType.WIRELESS in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
@@ -1120,8 +1128,8 @@ def generate_template_file() -> None:
     eval_settings = EvaluationEnvelope(
         experiments=[
             ExperimentSettings(
-                start=datetime.now(),
-                end=datetime.now(),
+                start=datetime.now(ZoneInfo("Asia/Tokyo")),
+                end=datetime.now(ZoneInfo("Europe/Berlin")),
                 retrieval_offsets={
                     FrameType.IPERF: timedelta(seconds=-200),
                     FrameType.WIRELESS: timedelta(seconds=150),
