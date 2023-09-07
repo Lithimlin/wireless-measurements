@@ -5,6 +5,7 @@ from ipaddress import IPv4Address
 from typing import Any, Iterable, Literal, Optional
 
 from influxdb_client import InfluxDBClient  # type: ignore[import]
+from influxdb_client.client.write_api import SYNCHRONOUS
 from pandas import DataFrame
 from pydantic import (
     AliasChoices,
@@ -55,7 +56,7 @@ class InfluxDBSettings(ServerSettings):
             url=self.url,
             token=self.token.get_secret_value(),
             org=self.org,
-        ).write_api()
+        ).write_api(write_options=SYNCHRONOUS)
 
     @cached_property
     def query_api(self) -> InfluxDBClient.query_api:
@@ -66,11 +67,17 @@ class InfluxDBSettings(ServerSettings):
         ).query_api()
 
     def build_query(self, start: datetime, end: datetime, filters: str) -> str:
+        def format_datetime(dt: datetime) -> str:
+            string = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+            if string[-3] != ":":
+                string = f"{string[:-2]}:{string[-2:]}"
+            return string
+
         return (
             _InfluxDBConstants.QUERY_START.format(
                 bucket=self.bucket,
-                start=start.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                end=end.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                start=format_datetime(start),
+                end=format_datetime(end),
             )
             + filters
             + _InfluxDBConstants.QUERY_END
@@ -86,6 +93,7 @@ class InfluxDBSettings(ServerSettings):
 
     def write(self, record: Any, **kwargs) -> None:
         self.write_api.write(org=self.org, bucket=self.bucket, record=record, **kwargs)
+        self.write_api.flush()
 
 
 class Iperf3Settings(ServerSettings):
