@@ -18,7 +18,7 @@ from pydantic_settings import (
 )
 from scipy.spatial import distance  # type: ignore[import]
 
-MODULE_LOGGER = module_logging.get_logger(module_logging.logging.DEBUG)
+MODULE_LOGGER = module_logging.get_logger(module_logging.logging.INFO)
 
 
 class MissionConfig(BaseModel):
@@ -210,7 +210,8 @@ def plot_points_line(ax: Axes3D, points: MissionPoints, **kwargs) -> None:
 
 
 def store_model(data: MissionConfigs, filename: str) -> None:
-    path = Path(filename).expanduser()
+    path = Path(__file__).parent / Path(filename).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
     MODULE_LOGGER.debug(f"Storing model to {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
 
