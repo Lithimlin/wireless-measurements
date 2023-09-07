@@ -69,8 +69,8 @@ class InfluxDBSettings(ServerSettings):
         return (
             _InfluxDBConstants.QUERY_START.format(
                 bucket=self.bucket,
-                start=start.isoformat(),
-                end=end.isoformat(),
+                start=start.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                end=end.strftime("%Y-%m-%dT%H:%M:%S%z"),
             )
             + filters
             + _InfluxDBConstants.QUERY_END
