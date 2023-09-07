@@ -818,37 +818,37 @@ class ExperimentSettings(ExperimentDefaults):
     def uav_query(self) -> str:
         start, end = self._get_offset_time(FrameType.UAV)
 
-        return self.influxDB.build_influx_query(
+        return self.influxDB.build_query(
             start,
             end,
             f"""
-            {InfluxDBSettings.build_influx_filters("_measurement", ["drone_metrics"])}
-            {InfluxDBSettings.build_influx_filters("_field", list(self.uav_fields.values()))}""",
+            {InfluxDBSettings.build_filters("_measurement", ["drone_metrics"])}
+            {InfluxDBSettings.build_filters("_field", list(self.uav_fields.values()))}""",
         )
 
     @property
     def iperf_query(self) -> str:
         start, end = self._get_offset_time(FrameType.IPERF)
 
-        return self.influxDB.build_influx_query(
+        return self.influxDB.build_query(
             start,
             end,
             f"""
-            {InfluxDBSettings.build_influx_filters("_measurement", ["iperf3"])}
-            {InfluxDBSettings.build_influx_filters("_field", list(self.iperf_fields.values()))}
-            {InfluxDBSettings.build_influx_filters("type", self.stream_types)}""",
+            {InfluxDBSettings.build_filters("_measurement", ["iperf3"])}
+            {InfluxDBSettings.build_filters("_field", list(self.iperf_fields.values()))}
+            {InfluxDBSettings.build_filters("type", self.stream_types)}""",
         )
 
     @property
     def wireless_query(self) -> str:
         start, end = self._get_offset_time(FrameType.WIRELESS)
 
-        return self.influxDB.build_influx_query(
+        return self.influxDB.build_query(
             start,
             end,
             f"""
-            {InfluxDBSettings.build_influx_filters("_measurement", ["wireless"])}
-            {InfluxDBSettings.build_influx_filters("_field", list(self.wireless_fields.values()))}""",
+            {InfluxDBSettings.build_filters("_measurement", ["wireless"])}
+            {InfluxDBSettings.build_filters("_field", list(self.wireless_fields.values()))}""",
         )
 
     @staticmethod
@@ -866,9 +866,7 @@ class ExperimentSettings(ExperimentDefaults):
         return data
 
     def _get_uav_data(self) -> pd.DataFrame:
-        data = self.influxDB.query_api.query_data_frame(
-            self.uav_query, org=self.influxDB.org
-        )
+        data = self.influxDB.query_data_frame(self.uav_query)
         if FrameType.UAV in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
                 lambda t: t - self.retrieval_offsets[FrameType.UAV]
@@ -878,9 +876,7 @@ class ExperimentSettings(ExperimentDefaults):
         return data
 
     def _get_iperf_data(self) -> pd.DataFrame:
-        data = self.influxDB.query_api.query_data_frame(
-            self.iperf_query, org=self.influxDB.org
-        )
+        data = self.influxDB.query_data_frame(self.iperf_query)
         if FrameType.IPERF in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
                 lambda t: t - self.retrieval_offsets[FrameType.IPERF]
@@ -890,9 +886,7 @@ class ExperimentSettings(ExperimentDefaults):
         return data
 
     def _get_wireless_data(self) -> pd.DataFrame:
-        data = self.influxDB.query_api.query_data_frame(
-            self.wireless_query, org=self.influxDB.org
-        )
+        data = self.influxDB.query_data_frame(self.wireless_query)
         if FrameType.WIRELESS in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
                 lambda t: t - self.retrieval_offsets[FrameType.WIRELESS]

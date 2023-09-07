@@ -49,6 +49,14 @@ class InfluxDBSettings(ServerSettings):
     )
 
     @cached_property
+    def write_api(self) -> InfluxDBClient.write_api:
+        return InfluxDBClient(
+            url=self.url,
+            token=self.token.get_secret_value(),
+            org=self.org,
+        ).write_api()
+
+    @cached_property
     def query_api(self) -> InfluxDBClient.query_api:
         return InfluxDBClient(
             url=self.url,
@@ -56,7 +64,7 @@ class InfluxDBSettings(ServerSettings):
             org=self.org,
         ).query_api()
 
-    def build_influx_query(self, start: datetime, end: datetime, filters: str) -> str:
+    def build_query(self, start: datetime, end: datetime, filters: str) -> str:
         return (
             _InfluxDBConstants.QUERY_START.format(
                 bucket=self.bucket,
@@ -68,9 +76,12 @@ class InfluxDBSettings(ServerSettings):
         )
 
     @staticmethod
-    def build_influx_filters(tag: str, values: Sequence[str]) -> str:
+    def build_filters(tag: str, values: Sequence[str]) -> str:
         searches = " or ".join([f'r["{tag}"] == "{value}"' for value in values])
         return f"|> filter(fn: (r) => {searches})"
+
+    def query_data_frame(self, query: str) -> "pandas.DataFrame":
+        return self.query_api.query_data_frame(query, self.org)
 
 
 class Iperf3Settings(ServerSettings):
