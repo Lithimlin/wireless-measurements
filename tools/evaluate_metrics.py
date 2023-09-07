@@ -156,7 +156,7 @@ class Axes2DSettings(Axes2DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -191,7 +191,7 @@ class TwinAxes2DDefaults(Axes2DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -310,7 +310,7 @@ class InterplolationSettings3D(InterpolationDefaults3D):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -378,7 +378,7 @@ class Contour3DSettings(Contour3DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -485,7 +485,7 @@ class Axes3DSettings(Axes3DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -609,7 +609,7 @@ class FigureSettings(FigureDefaults):
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
         cls._validate_figure_settings(data)
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -799,7 +799,7 @@ class ExperimentSettings(ExperimentDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.debug(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -858,7 +858,9 @@ class ExperimentSettings(ExperimentDefaults):
 
     @staticmethod
     def _process_dataframe(data: pd.DataFrame) -> pd.DataFrame:
-        MODULE_LOGGER.verbose("Processing dataframe\n%s", data.describe())
+        MODULE_LOGGER.verbose(
+            "Processing dataframe\n%s", data.describe() if not data.empty else data
+        )
         if data.empty:
             raise ValueError(
                 "DataFrame is empty. Perhaps incorrect filters were specified?"
@@ -879,6 +881,7 @@ class ExperimentSettings(ExperimentDefaults):
             )
         data = ExperimentSettings._process_dataframe(data)
         data = data.rename(columns=invert_dict(self.uav_fields))
+        MODULE_LOGGER.debug("UAV data:\n%s", data.head(20))
         return data
 
     def _get_iperf_data(self) -> pd.DataFrame:
@@ -890,6 +893,7 @@ class ExperimentSettings(ExperimentDefaults):
             )
         data = ExperimentSettings._process_dataframe(data)
         data = data.rename(columns=invert_dict(self.iperf_fields))
+        MODULE_LOGGER.debug("Iperf data:\n%s", data.head(20))
         return data
 
     def _get_wireless_data(self) -> pd.DataFrame:
@@ -901,6 +905,7 @@ class ExperimentSettings(ExperimentDefaults):
             )
         data = ExperimentSettings._process_dataframe(data)
         data = data.rename(columns=invert_dict(self.wireless_fields))
+        MODULE_LOGGER.debug("Wireless data:\n%s", data.head(20))
         return data
 
     def _collect_frames(self) -> pd.DataFrame:
@@ -914,7 +919,9 @@ class ExperimentSettings(ExperimentDefaults):
     def geo_data(self) -> gpd.GeoDataFrame:
         data = self._collect_frames()
 
-        MODULE_LOGGER.debug("Collected data:\n%s", data.describe())
+        MODULE_LOGGER.debug(
+            "Collected data:\n%s", data.describe() if not data.empty else data
+        )
 
         # fix zero-altitudes
         data["alt"] = data["alt"].replace(0, np.nan).interpolate(method="linear")
@@ -1013,7 +1020,7 @@ class EvaluationEnvelope(BaseSettings):
     @field_validator("experiment_defaults")
     @classmethod
     def _set_experiment_defaults(cls, value: ExperimentDefaults) -> ExperimentDefaults:
-        MODULE_LOGGER.debug("Setting experiment defaults")
+        MODULE_LOGGER.verbose("Setting experiment defaults")
         ExperimentSettings.DEFAULTS = value
         return value
 
@@ -1022,63 +1029,63 @@ class EvaluationEnvelope(BaseSettings):
     def _set_correlation_defaults(
         cls, value: CorrelationCalcDefaults
     ) -> CorrelationCalcDefaults:
-        MODULE_LOGGER.debug("Setting correlation calculation defaults")
+        MODULE_LOGGER.verbose("Setting correlation calculation defaults")
         CorrelationCalcSettings.DEFAULTS = value
         return value
 
     @field_validator("figure_defaults")
     @classmethod
     def _set_figure_defaults(cls, value: FigureDefaults) -> FigureDefaults:
-        MODULE_LOGGER.debug("Setting figure defaults")
+        MODULE_LOGGER.verbose("Setting figure defaults")
         FigureSettings.DEFAULTS = value
         return value
 
     @field_validator("axes3d_defaults")
     @classmethod
     def _set_axes3d_defaults(cls, value: Axes3DDefaults) -> Axes3DDefaults:
-        MODULE_LOGGER.debug("Setting axes3D defaults")
+        MODULE_LOGGER.verbose("Setting axes3D defaults")
         Axes3DSettings.DEFAULTS = value
         return value
 
     @field_validator("axes2d_defaults")
     @classmethod
     def _set_axes2d_defaults(cls, value: Axes2DDefaults) -> Axes2DDefaults:
-        MODULE_LOGGER.debug("Setting axes2D defaults")
+        MODULE_LOGGER.verbose("Setting axes2D defaults")
         Axes2DSettings.DEFAULTS = value
         return value
 
     @field_validator("twin_axes2d_defaults")
     @classmethod
     def _set_twin_axes2d_defaults(cls, value: TwinAxes2DDefaults) -> TwinAxes2DDefaults:
-        MODULE_LOGGER.debug("Setting twin axes2D defaults")
+        MODULE_LOGGER.verbose("Setting twin axes2D defaults")
         TwinAxes2DSettings.DEFAULTS = value
         return value
 
     @field_validator("line2d_defaults")
     @classmethod
     def _set_line2d_defaults(cls, value: Line2DSettings) -> Line2DSettings:
-        MODULE_LOGGER.debug("Setting line2D defaults")
+        MODULE_LOGGER.verbose("Setting line2D defaults")
         Line2DSettings.DEFAULT_DICT = value.kwargs
         return value
 
     @field_validator("path3d_defaults")
     @classmethod
     def _set_path3d_defaults(cls, value: Path3DSettings) -> Path3DSettings:
-        MODULE_LOGGER.debug("Setting path3D defaults")
+        MODULE_LOGGER.verbose("Setting path3D defaults")
         Path3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
     @field_validator("stem3d_defaults")
     @classmethod
     def _set_stem3d_defaults(cls, value: Stem3DSettings) -> Stem3DSettings:
-        MODULE_LOGGER.debug("Setting stem3D defaults")
+        MODULE_LOGGER.verbose("Setting stem3D defaults")
         Stem3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
     @field_validator("scatter3d_defaults")
     @classmethod
     def _set_scatter3d_defaults(cls, value: Scatter3DSettings) -> Scatter3DSettings:
-        MODULE_LOGGER.debug("Setting scatter3D defaults")
+        MODULE_LOGGER.verbose("Setting scatter3D defaults")
         Scatter3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
@@ -1087,7 +1094,7 @@ class EvaluationEnvelope(BaseSettings):
     def _set_interpolated3d_defaults(
         cls, value: Interpolated3DSettings
     ) -> Interpolated3DSettings:
-        MODULE_LOGGER.debug("Setting interpolated3D defaults")
+        MODULE_LOGGER.verbose("Setting interpolated3D defaults")
         Interpolated3DSettings.DEFAULTS = InterpolationDefaults3D(
             num_points=value.num_points, interpolation_method=value.interpolation_method
         )
@@ -1099,14 +1106,14 @@ class EvaluationEnvelope(BaseSettings):
     def _set_interpolation3d_defaults(
         cls, value: InterpolationDefaults3D
     ) -> InterpolationDefaults3D:
-        MODULE_LOGGER.debug("Setting interpolation3D defaults")
+        MODULE_LOGGER.verbose("Setting interpolation3D defaults")
         InterplolationSettings3D.DEFAULTS = value
         return value
 
     @field_validator("contour3d_defaults")
     @classmethod
     def _set_contour3d_defaults(cls, value: Contour3DDefaults) -> Contour3DDefaults:
-        MODULE_LOGGER.debug("Setting contour3D defaults")
+        MODULE_LOGGER.verbose("Setting contour3D defaults")
         Contour3DSettings.DEFAULT_DICT = value.kwargs
         Contour3DSettings.DEFAULTS = value
         return value
