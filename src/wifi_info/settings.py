@@ -1,7 +1,10 @@
 import logging
+from datetime import datetime
+from functools import cached_property
 from ipaddress import IPv4Address
-from typing import Literal, Optional
+from typing import Literal, Optional, Sequence
 
+from influxdb_client import InfluxDBClient
 from pydantic import (
     AliasChoices,
     Field,
@@ -26,6 +29,14 @@ class ServerSettings(BaseSettings):
         return f"{self.host}:{self.port}"
 
 
+class _InfluxDBConstants:
+    QUERY_START = """from(bucket: "{bucket}")
+    |> range(start: {start}, stop: {end})"""
+    QUERY_END = (
+        '|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")'
+    )
+
+
 class InfluxDBSettings(ServerSettings):
     port: int = Field(default=8086, exclude=True)
     org: str
@@ -36,6 +47,30 @@ class InfluxDBSettings(ServerSettings):
             "token", "push_token", "query_token", "bucket_token"
         ),
     )
+
+    @cached_property
+    def query_api(self) -> InfluxDBClient.query_api:
+        return InfluxDBClient(
+            url=self.url,
+            token=self.token.get_secret_value(),
+            org=self.org,
+        ).query_api()
+
+    def build_influx_query(self, start: datetime, end: datetime, filters: str) -> str:
+        return (
+            _InfluxDBConstants.QUERY_START.format(
+                bucket=self.bucket,
+                start=start.isoformat(),
+                end=end.isoformat(),
+            )
+            + filters
+            + _InfluxDBConstants.QUERY_END
+        )
+
+    @staticmethod
+    def build_influx_filters(tag: str, values: Sequence[str]) -> str:
+        searches = " or ".join([f'r["{tag}"] == "{value}"' for value in values])
+        return f"|> filter(fn: (r) => {searches})"
 
 
 class Iperf3Settings(ServerSettings):
