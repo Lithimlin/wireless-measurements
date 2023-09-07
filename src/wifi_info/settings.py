@@ -2,9 +2,10 @@ import logging
 from datetime import datetime
 from functools import cached_property
 from ipaddress import IPv4Address
-from typing import Literal, Optional, Sequence
+from typing import Any, Iterable, Literal, Optional
 
-from influxdb_client import InfluxDBClient
+from influxdb_client import InfluxDBClient  # type: ignore[import]
+from pandas import DataFrame
 from pydantic import (
     AliasChoices,
     Field,
@@ -76,12 +77,15 @@ class InfluxDBSettings(ServerSettings):
         )
 
     @staticmethod
-    def build_filters(tag: str, values: Sequence[str]) -> str:
+    def build_filters(tag: str, values: Iterable[str]) -> str:
         searches = " or ".join([f'r["{tag}"] == "{value}"' for value in values])
         return f"|> filter(fn: (r) => {searches})"
 
-    def query_data_frame(self, query: str) -> "pandas.DataFrame":
+    def query_data_frame(self, query: str) -> DataFrame | list[DataFrame]:
         return self.query_api.query_data_frame(query, self.org)
+
+    def write(self, record: Any, **kwargs) -> None:
+        self.write_api.write(org=self.org, bucket=self.bucket, record=record, **kwargs)
 
 
 class Iperf3Settings(ServerSettings):
