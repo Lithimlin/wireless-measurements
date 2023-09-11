@@ -1123,7 +1123,7 @@ class EvaluationEnvelope(BaseSettings):
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
         env_prefix="EVAL_",
-        json_file="eval.json",
+        json_file=("../eval.json", "../eval.jsonc", "eval.json", "eval.jsonc"),
         json_file_encoding="utf-8",
         extra="ignore",
     )  # type: ignore[typeddict-unknown-key]
