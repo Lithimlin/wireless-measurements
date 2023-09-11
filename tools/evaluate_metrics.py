@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum, auto
 from functools import cached_property
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Optional
+from typing import Annotated, Any, Callable, ClassVar, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 import geopandas as gpd  # type: ignore[import]
@@ -82,6 +82,13 @@ class AxesSettings(BaseSettings, ABC):
     kwargs: dict[str, Any] = Field(
         default={}, required=False, description="additional kwargs for subplots"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_type_key(cls, data: dict[str, Any]) -> dict[str, Any]:
+        if "type" in data:
+            del data["type"]
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -552,7 +559,7 @@ class FigureDefaults(BaseSettings):
                 ret_data.append(axes_settings)
                 continue
 
-            axes_type = AxesType(axes_settings.pop("type"))
+            axes_type = AxesType(axes_settings["type"])
             ret_settings: AxesUnion
             match axes_type:
                 case AxesType.Axes2D:
@@ -625,8 +632,8 @@ class FigureSettings(FigureDefaults):
 
         axes: list[plt.Axes | Axes3D] = []
         axes3d: list[Axes3D] = []
-        for i, subfigure in enumerate(self.subfigures):
-            ax = subfigure.plot(fig, subplots, i + 1, data)
+        for subfig_index, subfigure in enumerate(self.subfigures):
+            ax = subfigure.plot(fig, subplots, subfig_index + 1, data)
             axes.append(ax)
             if isinstance(subfigure, Axes3DSettings):
                 axes3d.append(ax)
@@ -645,6 +652,141 @@ class FigureSettings(FigureDefaults):
             fig.tight_layout()
 
         return fig
+
+
+class OffsetFigureSettings(FigureSettings):
+    offset_range: range
+
+    @field_validator("offset_range", mode="before")
+    @classmethod
+    def _validate_offset_range(cls, data: dict[str, int] | range) -> range:
+        if isinstance(data, range):
+            return data
+
+        if "start" not in data:
+            data["start"] = 0
+        if "step" not in data:
+            data["step"] = 1
+        return range(data["start"], data["end"], data["step"])
+
+    @field_serializer("offset_range")
+    def _serialize_offset_range(self, value: range) -> dict[str, int]:
+        return {
+            "start": value.start,
+            "end": value.stop,
+            "step": value.step,
+        }
+
+    @model_validator(mode="wrap")
+    def _set_figure_dimensions(self, handler: Callable) -> "OffsetFigureSettings":
+        assert isinstance(self, dict)
+        MODULE_LOGGER.verbose("Defining figure dimensions from data: %s", self)
+        configured_dimensions = self.get("num_cols"), self.get("num_rows")
+
+        model: "OffsetFigureSettings" = handler(self)
+
+        match configured_dimensions:
+            case (None, None):
+                if len(model.subfigures) > 1:
+                    model.num_cols = len(model.subfigures)
+                    model.num_rows = len(model.offset_range)
+                else:
+                    model.num_cols = max(
+                        int(np.ceil(np.sqrt(len(model.offset_range)))), 1
+                    )
+                    model.num_rows = max(
+                        int(np.ceil(len(model.offset_range) / model.num_cols)), 1
+                    )
+
+            case (num_cols, None):
+                model.num_rows = int(np.ceil(len(model.offset_range) / num_cols))
+                model.num_cols = num_cols * len(model.subfigures)
+
+            case (None, num_rows):
+                model.num_cols = int(np.ceil(len(model.offset_range) / num_rows)) * len(
+                    model.subfigures
+                )
+                model.num_rows = num_rows
+
+            case (num_cols, num_rows):
+                if num_cols * num_rows < len(model.offset_range):
+                    raise ValueError(
+                        "Number of rows and columns cannot fit the specified number of offsets"
+                    )
+                model.num_cols = num_cols * len(model.subfigures)
+
+        MODULE_LOGGER.verbose(
+            "Figure dimensions: %d cols, %d rows for %d subfigures with %d offsets",
+            model.num_cols,
+            model.num_rows,
+            len(model.subfigures),
+            len(model.offset_range),
+        )
+        return model
+
+    @property
+    def num_cols_per_subfigure(self) -> int:
+        return self.num_cols // len(self.subfigures)
+
+    def plot(self, data: Iterable[gpd.GeoDataFrame]) -> plt.Figure:
+        fig = plt.figure(**self.kwargs)
+        subplots = (self.num_rows, self.num_cols)
+
+        axes: list[plt.Axes | Axes3D] = []
+        axes3d: list[Axes3D] = []
+        for subfig_index, subfigure in enumerate(self.subfigures):
+            base_title = subfigure.title
+            if base_title == "" or base_title is None:
+                base_title = ""
+            else:
+                base_title = f"\n{base_title}"
+            for offset_index, (datum, offset) in enumerate(
+                zip(data, self.offset_range)
+            ):
+                col_index = offset_index // self.num_cols_per_subfigure
+                subfigure.title = f"Offset: {offset} s{base_title}"
+                MODULE_LOGGER.verbose(
+                    "Plotting subfigure %d, offset %d (%s) at index %d",
+                    subfig_index,
+                    offset_index,
+                    subfigure.title,
+                    subfig_index * self.num_cols_per_subfigure
+                    + self.num_cols * col_index
+                    + offset_index % self.num_cols_per_subfigure
+                    + 1,
+                )
+                ax = subfigure.plot(
+                    fig,
+                    subplots,
+                    subfig_index * self.num_cols_per_subfigure
+                    + self.num_cols * col_index
+                    + offset_index % self.num_cols_per_subfigure
+                    + 1,
+                    datum,
+                )
+                axes.append(ax)
+                if isinstance(subfigure, Axes3DSettings):
+                    axes3d.append(ax)
+
+        # if len(axes3d) > 1:
+        #     for ax3d in axes3d[1:]:
+        #         axes3d[0].shareview(ax3d)
+
+        if self.title:
+            fig.suptitle(self.title)
+        if self.xlabel:
+            fig.supxlabel(self.xlabel)
+        if self.ylabel:
+            fig.supylabel(self.ylabel)
+        if self.tight_layout:
+            fig.tight_layout()
+
+        return fig
+
+
+FiguresUnion = Annotated[
+    FigureSettings | OffsetFigureSettings, "Union of possible figures"
+]
 
 
 class CorrelationCalcDefaults(BaseSettings):
@@ -682,7 +824,6 @@ class FrameType(StrEnum):
 
 class ExperimentDefaults(BaseSettings):
     retrieval_offsets: dict[FrameType, timedelta] = Field(default={}, required=False)
-    offset_range: range = Field(default=range(0, 0), required=False)
 
     influxDB: InfluxDBSettings = Field(
         default=InfluxDBSettings(
@@ -714,7 +855,7 @@ class ExperimentDefaults(BaseSettings):
     )
     stream_types: list[str] = Field(default=["interval sum"], required=False)
 
-    figures: list[FigureSettings] = Field(
+    figures: list[FiguresUnion] = Field(
         default=[
             FigureSettings(),
             FigureSettings(subfigures=[Axes3DSettings()]),
@@ -727,26 +868,6 @@ class ExperimentDefaults(BaseSettings):
     )
 
     crs_target: Optional[str] = Field(default=None, required=False)
-
-    @field_validator("offset_range", mode="before")
-    @classmethod
-    def _validate_offset_range(cls, data: dict[str, int] | range) -> range:
-        if isinstance(data, range):
-            return data
-
-        if "start" not in data:
-            data["start"] = 0
-        if "step" not in data:
-            data["step"] = 1
-        return range(data["start"], data["end"], data["step"])
-
-    @field_serializer("offset_range")
-    def _serialize_offset_range(self, value: range) -> dict[str, int]:
-        return {
-            "start": value.start,
-            "end": value.stop,
-            "step": value.step,
-        }
 
     @property
     def eval_field_names(self) -> list[str]:
@@ -809,19 +930,20 @@ class ExperimentSettings(ExperimentDefaults):
     def _serialize_start_end(self, value: datetime) -> str:
         return value.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-    def _get_offset_time(self, frame_type: FrameType) -> tuple[datetime, datetime]:
+    def _get_offset_time(
+        self, frame_type: FrameType, extra_offset: timedelta = timedelta(seconds=0)
+    ) -> tuple[datetime, datetime]:
         start = self.start
         end = self.end
 
         if frame_type in self.retrieval_offsets:
-            start += self.retrieval_offsets[frame_type]
-            end += self.retrieval_offsets[frame_type]
+            start += self.retrieval_offsets[frame_type] + extra_offset
+            end += self.retrieval_offsets[frame_type] + extra_offset
 
         return start, end
 
-    @property
-    def uav_query(self) -> str:
-        start, end = self._get_offset_time(FrameType.UAV)
+    def uav_query(self, extra_offset: timedelta = timedelta(seconds=0)) -> str:
+        start, end = self._get_offset_time(FrameType.UAV, extra_offset)
 
         return self.influxDB.build_query(
             start,
@@ -831,9 +953,8 @@ class ExperimentSettings(ExperimentDefaults):
             {InfluxDBSettings.build_filters("_field", self.uav_fields.values())}""",
         )
 
-    @property
-    def iperf_query(self) -> str:
-        start, end = self._get_offset_time(FrameType.IPERF)
+    def iperf_query(self, extra_offset: timedelta = timedelta(seconds=0)) -> str:
+        start, end = self._get_offset_time(FrameType.IPERF, extra_offset)
 
         return self.influxDB.build_query(
             start,
@@ -844,9 +965,8 @@ class ExperimentSettings(ExperimentDefaults):
             {InfluxDBSettings.build_filters("type", self.stream_types)}""",
         )
 
-    @property
-    def wireless_query(self) -> str:
-        start, end = self._get_offset_time(FrameType.WIRELESS)
+    def wireless_query(self, extra_offset: timedelta = timedelta(seconds=0)) -> str:
+        start, end = self._get_offset_time(FrameType.WIRELESS, extra_offset)
 
         return self.influxDB.build_query(
             start,
@@ -872,52 +992,77 @@ class ExperimentSettings(ExperimentDefaults):
         )
         return data
 
-    def _get_uav_data(self) -> pd.DataFrame:
-        MODULE_LOGGER.debug("UAV query: %s", self.uav_query)
-        data = self.influxDB.query_data_frame(self.uav_query)
+    def _get_uav_data(
+        self, extra_offset: timedelta = timedelta(seconds=0)
+    ) -> pd.DataFrame:
+        query = self.uav_query(extra_offset)
+        MODULE_LOGGER.debug("UAV query: %s", query)
+        data = self.influxDB.query_data_frame(query)
+
+        if isinstance(data, list):
+            raise ValueError("Got list of dataframes from uav query")
+
         if FrameType.UAV in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
-                lambda t: t - self.retrieval_offsets[FrameType.UAV]
+                lambda t: t - self.retrieval_offsets[FrameType.UAV] - extra_offset
             )
         data = ExperimentSettings._process_dataframe(data)
         data = data.rename(columns=invert_dict(self.uav_fields))
-        MODULE_LOGGER.debug("UAV data:\n%s", data.head(20))
+        MODULE_LOGGER.debug("UAV data:\n%s", data.head(4))
         return data
 
-    def _get_iperf_data(self) -> pd.DataFrame:
-        MODULE_LOGGER.debug("Iperf query: %s", self.iperf_query)
-        data = self.influxDB.query_data_frame(self.iperf_query)
+    def _get_iperf_data(
+        self, extra_offset: timedelta = timedelta(seconds=0)
+    ) -> pd.DataFrame:
+        query = self.iperf_query(extra_offset)
+        MODULE_LOGGER.debug("Iperf query: %s", query)
+        data = self.influxDB.query_data_frame(query)
+
+        if isinstance(data, list):
+            raise ValueError("Got list of dataframes from iperf query")
+
         if FrameType.IPERF in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
-                lambda t: t - self.retrieval_offsets[FrameType.IPERF]
+                lambda t: t - self.retrieval_offsets[FrameType.IPERF] - extra_offset
             )
         data = ExperimentSettings._process_dataframe(data)
         data = data.rename(columns=invert_dict(self.iperf_fields))
-        MODULE_LOGGER.debug("Iperf data:\n%s", data.head(20))
+        MODULE_LOGGER.debug("Iperf data:\n%s", data.head(4))
         return data
 
-    def _get_wireless_data(self) -> pd.DataFrame:
-        MODULE_LOGGER.debug("Wireless query: %s", self.wireless_query)
-        data = self.influxDB.query_data_frame(self.wireless_query)
+    def _get_wireless_data(
+        self, extra_offset: timedelta = timedelta(seconds=0)
+    ) -> pd.DataFrame:
+        query = self.wireless_query(extra_offset)
+        MODULE_LOGGER.debug("Wireless query: %s", query)
+        data = self.influxDB.query_data_frame(query)
+
+        if isinstance(data, list):
+            raise ValueError("Got list of dataframes from wireless query")
+
         if FrameType.WIRELESS in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
-                lambda t: t - self.retrieval_offsets[FrameType.WIRELESS]
+                lambda t: t - self.retrieval_offsets[FrameType.WIRELESS] - extra_offset
             )
         data = ExperimentSettings._process_dataframe(data)
         data = data.rename(columns=invert_dict(self.wireless_fields))
-        MODULE_LOGGER.debug("Wireless data:\n%s", data.head(20))
+        MODULE_LOGGER.debug("Wireless data:\n%s", data.head(4))
         return data
 
-    def _collect_frames(self) -> pd.DataFrame:
-        uav_data = self._get_uav_data()
-        iperf_data = self._get_iperf_data()
-        wireless_data = self._get_wireless_data()
+    def _collect_frames(
+        self, extra_offset: timedelta = timedelta(seconds=0)
+    ) -> pd.DataFrame:
+        uav_data = self._get_uav_data(extra_offset)
+        iperf_data = self._get_iperf_data(extra_offset)
+        wireless_data = self._get_wireless_data(extra_offset)
 
         return uav_data.join(iperf_data).join(wireless_data)
 
-    @cached_property
-    def geo_data(self) -> gpd.GeoDataFrame:
-        data = self._collect_frames()
+    # @cached_property
+    def get_geo_data(
+        self, extra_offset: timedelta = timedelta(seconds=0)
+    ) -> gpd.GeoDataFrame:
+        data = self._collect_frames(extra_offset)
 
         MODULE_LOGGER.debug(
             "Collected data:\n%s", data.describe() if not data.empty else data
@@ -951,16 +1096,24 @@ class ExperimentSettings(ExperimentDefaults):
 
         return geo_data
 
+    def get_offset_geo_data_list(self, offsets: range) -> list[gpd.GeoDataFrame]:
+        return [self.get_geo_data(timedelta(seconds=offset)) for offset in offsets]
+
     def plot(self):
         figs = []
         for figure in self.figures:
-            figs.append(figure.plot(self.geo_data))
+            if isinstance(figure, OffsetFigureSettings):
+                figs.append(
+                    figure.plot(self.get_offset_geo_data_list(figure.offset_range))
+                )
+            else:
+                figs.append(figure.plot(self.get_geo_data()))
         return figs
 
     def calculate(self):
         corrs = []
         for corr in self.correlations:
-            corrs.append(corr.calculate(self.geo_data))
+            corrs.append(corr.calculate(self.get_geo_data()))
         return corrs
 
 

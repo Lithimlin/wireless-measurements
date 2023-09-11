@@ -136,11 +136,6 @@
   },
   "experiment_defaults": {
     "retrieval_offsets": {},
-    "offset_range": {
-      "start": 0,
-      "end": 0,
-      "step": 1
-    },
     "influxDB": {
       "org": "my-org",
       "bucket": "my-bucket",
@@ -232,11 +227,6 @@
         "wireless": "PT150S",
         "uav": "PT7200S"
       },
-      "offset_range": {
-        "start": 0,
-        "end": 0,
-        "step": 1
-      },
       "influxDB": {
         "org": "my-org",
         "bucket": "my-bucket",
@@ -320,8 +310,8 @@
       ],
       "correlations": [],
       "crs_target": null,
-      "start": "2023-09-07T17:45:32+0900",
-      "end": "2023-09-07T10:45:32+0200"
+      "start": "2023-09-11T12:37:01+0900",
+      "end": "2023-09-11T05:37:01+0200"
     }
   ]
 }
