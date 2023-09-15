@@ -128,11 +128,12 @@
     ],
     "num_cols": 1,
     "num_rows": 1,
-    "title": "",
+    "title": "{experiment_name}",
     "xlabel": "",
     "ylabel": "",
     "tight_layout": true,
-    "kwargs": {}
+    "kwargs": {},
+    "figure_name": ""
   },
   "experiment_defaults": {
     "retrieval_offsets": {},
@@ -177,11 +178,12 @@
         ],
         "num_cols": 1,
         "num_rows": 1,
-        "title": "",
+        "title": "{experiment_name}",
         "xlabel": "",
         "ylabel": "",
         "tight_layout": true,
-        "kwargs": {}
+        "kwargs": {},
+        "figure_name": ""
       },
       {
         "subfigures": [
@@ -210,15 +212,22 @@
         ],
         "num_cols": 1,
         "num_rows": 1,
-        "title": "",
+        "title": "{experiment_name}",
         "xlabel": "",
         "ylabel": "",
         "tight_layout": true,
-        "kwargs": {}
+        "kwargs": {},
+        "figure_name": ""
       }
     ],
     "correlations": [],
-    "crs_target": null
+    "crs_target": null,
+    "output_file_template": null,
+    "output_kwargs": {
+      "format": "png",
+      "transparent": true,
+      "dpi": 300
+    }
   },
   "experiments": [
     {
@@ -268,11 +277,12 @@
           ],
           "num_cols": 1,
           "num_rows": 1,
-          "title": "",
+          "title": "Example experiment",
           "xlabel": "",
           "ylabel": "",
           "tight_layout": true,
-          "kwargs": {}
+          "kwargs": {},
+          "figure_name": ""
         },
         {
           "subfigures": [
@@ -301,17 +311,25 @@
           ],
           "num_cols": 1,
           "num_rows": 1,
-          "title": "",
+          "title": "Example experiment",
           "xlabel": "",
           "ylabel": "",
           "tight_layout": true,
-          "kwargs": {}
+          "kwargs": {},
+          "figure_name": ""
         }
       ],
       "correlations": [],
       "crs_target": null,
-      "start": "2023-09-11T12:37:01+0900",
-      "end": "2023-09-11T05:37:01+0200"
+      "output_file_template": "{title}-{figure_name}.png",
+      "output_kwargs": {
+        "format": "png",
+        "transparent": true,
+        "dpi": 300
+      },
+      "experiment_name": "Example experiment",
+      "start": "2023-09-15T18:48:43+0900",
+      "end": "2023-09-15T11:48:43+0200"
     }
   ]
 }

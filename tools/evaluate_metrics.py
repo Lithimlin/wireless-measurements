@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum, auto
 from functools import cached_property
 from pathlib import Path
+from re import findall
 from typing import Annotated, Any, Callable, ClassVar, Iterable, Optional
 from zoneinfo import ZoneInfo
 
@@ -538,14 +539,32 @@ class FigureDefaults(BaseSettings):
     num_cols: PositiveInt = 1
     num_rows: PositiveInt = 1
 
-    title: str = Field(default="", required=False)
-    xlabel: str = Field(default="", required=False)
-    ylabel: str = Field(default="", required=False)
+    title: str = Field(
+        default="{experiment_name}",
+        required=False,
+        description="Can be a format string",
+    )
+    xlabel: str = Field(
+        default="",
+        required=False,
+        description="Can be a format string",
+    )
+    ylabel: str = Field(
+        default="",
+        required=False,
+        description="Can be a format string",
+    )
 
     tight_layout: bool = Field(default=True, required=False)
 
     kwargs: dict[str, Any] = Field(
         default={}, required=False, description="additional kwargs for figure"
+    )
+
+    figure_name: str = Field(
+        default="",
+        required=False,
+        description="Can be used to specify the output filename for the figure",
     )
 
     @field_validator("subfigures", mode="before")
@@ -628,6 +647,28 @@ class FigureSettings(FigureDefaults):
                 data[field] = getattr(cls.DEFAULTS, field)
         return data
 
+    def format_string_fields(self, **kwargs):
+        MODULE_LOGGER.debug(f"Formatting string fields with arguments: {kwargs}")
+        MODULE_LOGGER.debug(
+            f"Before:\ntitle: {self.title}\nxlabel: {self.xlabel}\nylabel: {self.ylabel}"
+        )
+        self.title = self.title.format(**kwargs)
+        self.xlabel = self.xlabel.format(**kwargs)
+        self.ylabel = self.ylabel.format(**kwargs)
+        MODULE_LOGGER.debug(
+            f"After:\ntitle: {self.title}\nxlabel: {self.xlabel}\nylabel: {self.ylabel}"
+        )
+
+    def annotate_figure(self, fig: plt.Figure):
+        if self.title:
+            fig.suptitle(self.title)
+        if self.xlabel:
+            fig.supxlabel(self.xlabel)
+        if self.ylabel:
+            fig.supylabel(self.ylabel)
+        if self.tight_layout:
+            fig.tight_layout()
+
     def plot(self, data: gpd.GeoDataFrame) -> plt.Figure:
         fig = plt.figure(**self.kwargs)
         subplots = (self.num_rows, self.num_cols)
@@ -644,14 +685,7 @@ class FigureSettings(FigureDefaults):
         #     for ax3d in axes3d[1:]:
         #         axes3d[0].shareview(ax3d)
 
-        if self.title:
-            fig.suptitle(self.title)
-        if self.xlabel:
-            fig.supxlabel(self.xlabel)
-        if self.ylabel:
-            fig.supylabel(self.ylabel)
-        if self.tight_layout:
-            fig.tight_layout()
+        self.annotate_figure(fig)
 
         return fig
 
@@ -774,14 +808,7 @@ class OffsetFigureSettings(FigureSettings):
         #     for ax3d in axes3d[1:]:
         #         axes3d[0].shareview(ax3d)
 
-        if self.title:
-            fig.suptitle(self.title)
-        if self.xlabel:
-            fig.supxlabel(self.xlabel)
-        if self.ylabel:
-            fig.supylabel(self.ylabel)
-        if self.tight_layout:
-            fig.tight_layout()
+        self.annotate_figure(fig)
 
         return fig
 
@@ -871,6 +898,13 @@ class ExperimentDefaults(BaseSettings):
 
     crs_target: Optional[str] = Field(default=None, required=False)
 
+    output_file_template: Optional[str] = Field(default=None, required=False)
+
+    output_kwargs: Optional[dict[str, Any]] = Field(
+        default=dict(format="png", transparent=True, dpi=300),
+        required=False,
+    )
+
     @property
     def eval_field_names(self) -> list[str]:
         keys = list(self.iperf_fields.keys())
@@ -891,6 +925,19 @@ class ExperimentDefaults(BaseSettings):
         if not all(k in data.keys() for k in ["lat", "lon", "alt"]):
             raise ValueError("gps_fields must contain 'lat', 'lon' and 'alt' fields")
         return data
+
+    @field_validator("output_file_template")
+    @classmethod
+    def _validate_output_file_template(cls, fmt: Optional[str]) -> Optional[str]:
+        if fmt is None:
+            return None
+
+        for field in findall("{(.*?)}", fmt):
+            if field not in FigureDefaults.model_fields.keys():
+                raise ValueError(
+                    f"Field '{field}' in output_file_template is not a valid field of FigureDefaults. Valid entires are {list(FigureDefaults.model_fields.keys())}",
+                )
+        return fmt
 
     @model_validator(mode="after")  # type: ignore[arg-type]
     def _validate_settings(self) -> "ExperimentDefaults":
@@ -916,6 +963,12 @@ class ExperimentSettings(ExperimentDefaults):
 
     DEFAULTS: ClassVar[ExperimentDefaults] = ExperimentDefaults()
 
+    experiment_name: str = Field(
+        default="",
+        required=False,
+        description="Can be used in output filenames and figure titles via templates",
+    )
+
     start: datetime
     end: datetime
 
@@ -927,6 +980,14 @@ class ExperimentSettings(ExperimentDefaults):
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
         return data
+
+    @model_validator(mode="after")
+    def _format_figure_strings(self) -> "ExperimentDefaults":
+        MODULE_LOGGER.debug("Formatting figure strings...")
+        for figure in self.figures:
+            figure.format_string_fields(**dict(experiment_name=self.experiment_name))
+
+        return self
 
     @field_serializer("start", "end")
     def _serialize_start_end(self, value: datetime) -> str:
@@ -1096,10 +1157,17 @@ class ExperimentSettings(ExperimentDefaults):
         if self.DEFAULTS.crs_target is not None:
             geo_data = geo_data.to_crs(ExperimentSettings.DEFAULTS.crs_target)
 
+        # print(geo_data.head(2))
+        # geo_data = geo_data.loc[geo_data["mission_status"] == 2]
+
         return geo_data
 
     def get_offset_geo_data_list(self, offsets: range) -> list[gpd.GeoDataFrame]:
         return [self.get_geo_data(timedelta(seconds=offset)) for offset in offsets]
+
+    @cached_property
+    def cached_geo_data(self) -> gpd.GeoDataFrame:
+        return self.get_geo_data()
 
     def plot(self):
         figs = []
@@ -1109,13 +1177,22 @@ class ExperimentSettings(ExperimentDefaults):
                     figure.plot(self.get_offset_geo_data_list(figure.offset_range))
                 )
             else:
-                figs.append(figure.plot(self.get_geo_data()))
+                figs.append(figure.plot(self.cached_geo_data))
+            if self.output_file_template is not None:
+                filename = (
+                    self.output_file_template.format(**figure.model_dump())
+                    .replace(" ", "-")
+                    .lower()
+                )
+                path = Path(__file__).parent / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                figs[-1].savefig(path, **self.output_kwargs)
         return figs
 
     def calculate(self):
         corrs = []
         for corr in self.correlations:
-            corrs.append(corr.calculate(self.get_geo_data()))
+            corrs.append(corr.calculate(self.cached_geo_data))
         return corrs
 
 
@@ -1292,6 +1369,8 @@ def generate_template_file() -> None:
             ExperimentSettings(
                 start=datetime.now(ZoneInfo("Asia/Tokyo")),
                 end=datetime.now(ZoneInfo("Europe/Berlin")),
+                experiment_name="Example experiment",
+                output_file_template="{title}-{figure_name}.png",
                 retrieval_offsets={
                     FrameType.IPERF: timedelta(seconds=-200),
                     FrameType.WIRELESS: timedelta(seconds=150),
