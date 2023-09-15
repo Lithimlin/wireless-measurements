@@ -213,7 +213,6 @@ def store_model(data: MissionConfigs | MissionPoints, filename: str) -> None:
     path = Path(__file__).parent / Path(filename).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     MODULE_LOGGER.debug(f"Storing model to {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w") as f:
         json.dump(data.model_dump(mode="json"), f, indent=2)
