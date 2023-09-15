@@ -209,7 +209,7 @@ def plot_points_line(ax: Axes3D, points: MissionPoints, **kwargs) -> None:
     ax.plot(*points.to_ndarray().T, **kwargs)
 
 
-def store_model(data: MissionConfigs, filename: str) -> None:
+def store_model(data: MissionConfigs | MissionPoints, filename: str) -> None:
     path = Path(__file__).parent / Path(filename).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     MODULE_LOGGER.debug(f"Storing model to {path}")
@@ -270,6 +270,7 @@ class CoordSettings(BaseSettings):
 
         if self.max_height is None:
             self.max_height = self.radius
+        return self
 
     @classmethod
     def settings_customise_sources(
@@ -309,10 +310,8 @@ def generate_missions_points(
     plot_point_missions(ax, mission_configs)
 
     all_points = MissionPoints(points=[])
-    [
+    for mission in mission_configs.missions:
         all_points.extend(generate_circular_3d_points(mission))
-        for mission in mission_configs.missions
-    ]
     MODULE_LOGGER.info(f"Generated {len(all_points.points)} points")
     distances = distance.pdist(all_points.to_ndarray())
     MODULE_LOGGER.info(f"Min distance: {np.min(distances)}")
