@@ -405,19 +405,21 @@ class Contour3DSettings(Contour3DDefaults):
         kwargs = self.kwargs.copy()
 
         colors = sns.color_palette(kwargs.pop("cmap"), n_colors=self.number_contours)
-        data["category"] = pd.cut(values, bins=self.limit_contours)
+        data["category"] = pd.cut(values, bins=self.number_contours)
 
-        for i, (color, cat) in enumerate(zip(colors, data.category.cat.categories)):
+        for i, (color, category) in enumerate(
+            zip(colors, data.category.cat.categories)
+        ):
             if i not in self.limit_contours:
                 continue
-            sub_data = data.loc[data.category == cat, :]
-            sub_geometry = sub_data.geometry
+            sub_data = data.loc[data.category == category, :]
+            # sub_geometry = sub_data.geometry
             X, Y, Z = (
-                sub_geometry.x.values,
-                sub_geometry.y.values,
-                sub_geometry.z.values,
+                sub_data.geometry.x.values,
+                sub_data.geometry.y.values,
+                sub_data.geometry.z.values,
             )
-            ax.plot_surface(X, Y, Z, color=color, **kwargs)
+            ax.plot_trisurf(X, Y, Z, color=color, **kwargs)
 
 
 Plots3DUnion = Annotated[
