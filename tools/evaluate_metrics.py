@@ -1260,7 +1260,7 @@ class ExperimentSettings(ExperimentDefaults):
         )
         return geo_data
 
-    def plot(self):
+    def plot(self) -> list[plt.Figure]:
         figs = []
         for figure in self.figures:
             if isinstance(figure, OffsetFigureSettings):
@@ -1281,7 +1281,7 @@ class ExperimentSettings(ExperimentDefaults):
                 figs[-1].savefig(path, **self.output_kwargs)
         return figs
 
-    def calculate(self):
+    def calculate(self) -> list[pd.DataFrame]:
         corrs = []
         for corr in self.correlations:
             corrs.append(corr.calculate(self.cached_geo_data))
@@ -1477,11 +1477,28 @@ def main():
     sns.set_palette("colorblind")
     # Read settings
     eval_settings = EvaluationEnvelope()
+
+    correlationsPath = Path(__file__).parent.parent / "output" / "correlations.json"
+    if not correlationsPath.exists():
+        correlations = {}
+    else:
+        with open(correlationsPath, "r") as file:
+            correlations = json.load(file)
+
+    # Evaluate experiments
     for experiment in eval_settings.experiments:
         MODULE_LOGGER.info(f"Evaluate experiment: {experiment.experiment_name}")
         experiment.plot()
         for result in experiment.calculate():
             print(result)
+            if experiment.experiment_name not in correlations:
+                correlations[experiment.experiment_name] = {}
+            correlations[experiment.experiment_name][
+                f"{experiment.rolling_window_period}s"
+            ] = result.loc[result.index[-1], result.columns[0]]
+
+    with open(correlationsPath, "w") as file:
+        json.dump(correlations, file, indent=2)
 
     plt.show()
 
