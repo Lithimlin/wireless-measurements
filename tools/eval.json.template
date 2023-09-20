@@ -19,14 +19,6 @@
       "cmap": "viridis"
     }
   },
-  "interpolation3d_defaults": {
-    "num_points": [
-      15,
-      15,
-      10
-    ],
-    "interpolation_method": "linear"
-  },
   "interpolated3d_defaults": {
     "num_points": [
       15,
@@ -221,6 +213,7 @@
       }
     ],
     "correlations": [],
+    "rolling_window_period": 1,
     "crs_target": null,
     "output_file_template": null,
     "output_kwargs": {
@@ -320,6 +313,7 @@
         }
       ],
       "correlations": [],
+      "rolling_window_period": 1,
       "crs_target": null,
       "output_file_template": "{title}-{figure_name}.png",
       "output_kwargs": {
@@ -328,8 +322,8 @@
         "dpi": 300
       },
       "experiment_name": "Example experiment",
-      "start": "2023-09-15T18:48:43+0900",
-      "end": "2023-09-15T11:48:43+0200"
+      "start": "2023-09-20T10:52:10+0900",
+      "end": "2023-09-20T03:52:10+0200"
     }
   ]
 }

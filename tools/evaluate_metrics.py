@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import copy
 import json
 import sys
 from abc import ABC, abstractmethod
@@ -18,6 +19,12 @@ import numpy as np
 import pandas as pd  # type: ignore[import]
 import seaborn as sns  # type: ignore[import]
 from influxdb_client import InfluxDBClient  # type: ignore[import]
+from matplotlib.cm import ScalarMappable  # type: ignore[import]
+from matplotlib.collections import PathCollection  # type: ignore[import]
+from matplotlib.colors import Normalize  # type: ignore[import]
+from matplotlib.container import StemContainer  # type: ignore[import]
+from mpl_toolkits.mplot3d.art3d import Line3D  # type: ignore[import]
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from mpl_toolkits.mplot3d.axes3d import Axes3D  # type: ignore[import]
 from pydantic import (
     Field,
@@ -66,10 +73,10 @@ class PlotSettings(BaseSettings, ABC):
     @model_validator(mode="before")
     @classmethod
     def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")  # type: ignore[attr-defined]
         return data
 
-    def plot(self, *args, **kwargs) -> None:
+    def plot(self, *args, **kwargs) -> Any:
         raise NotImplementedError(
             f"Tried calling {__name__} method on {type(self).__name__} object"
         )
@@ -94,7 +101,7 @@ class AxesSettings(BaseSettings, ABC):
     @model_validator(mode="before")
     @classmethod
     def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")  # type: ignore[attr-defined]
         return data
 
     @abstractmethod
@@ -115,8 +122,9 @@ class Plot2DSettings(PlotSettings):
 
 
 class Line2DSettings(Plot2DSettings):
-    def plot(self, ax: plt.Axes, data: gpd.GeoSeries) -> None:
-        ax.plot(data, **self.kwargs)
+    def plot(self, ax: plt.Axes, data: gpd.GeoSeries) -> list[plt.Line2D]:
+        # return data.plot(ax=ax, **self.kwargs)
+        return ax.plot(data, **self.kwargs)
 
 
 Plots2DUnion = Annotated[Line2DSettings, "Union of available 2D plots"]
@@ -164,7 +172,7 @@ class Axes2DSettings(Axes2DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -179,12 +187,16 @@ class Axes2DSettings(Axes2DDefaults):
     ) -> plt.Axes:
         ax = fig.add_subplot(*subplots, ax_index, **self.kwargs)
 
+        patches = []
         for plot_2d in self.plots.values():
-            plot_2d.plot(ax, data[self.targets])
+            pp = plot_2d.plot(ax, data[self.targets])
+            patches.extend(pp)
 
         ax.set_title(self.title)
         ax.set_xlabel(self.xlabel)
         ax.set_ylabel(self.ylabel)
+
+        ax.legend(patches, self.targets)
 
         return ax
 
@@ -199,7 +211,7 @@ class TwinAxes2DDefaults(Axes2DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -230,15 +242,23 @@ class TwinAxes2DSettings(TwinAxes2DDefaults):
         ax_left = fig.add_subplot(*subplots, ax_index, **self.kwargs)
         ax_right = ax_left.twinx()
 
+        patches = []
         for plot_2d in self.plots.values():
-            plot_2d.plot(ax_left, data[self.targets])
+            pp = plot_2d.plot(ax_left, data[self.targets])
+            patches.extend(pp)
         ax_right._get_lines.prop_cycler = ax_left._get_lines.prop_cycler
         for plot_2d in self.plots.values():
-            plot_2d.plot(ax_right, data[self.twin_targets])
+            pp = plot_2d.plot(ax_right, data[self.twin_targets])
+            patches.extend(pp)
 
         ax_left.set_title(self.title)
         ax_left.set_xlabel(self.xlabel)
         ax_left.set_ylabel(self.ylabel)
+        ax_right.set_ylabel(self.ytwinlabel)
+
+        # ax_left.legend()
+        # ax_right.legend()
+        ax_left.legend(patches, self.targets + self.twin_targets)
 
         return ax_left
 
@@ -264,8 +284,8 @@ class Path3DSettings(Plot3DSettings):
         geometry: gpd.GeoSeries,
         *args,
         **kwargs,
-    ) -> None:
-        ax.plot3D(geometry.x, geometry.y, geometry.z, **self.kwargs)
+    ) -> list[Line3D]:
+        return ax.plot3D(geometry.x, geometry.y, geometry.z, **self.kwargs)
 
 
 class Stem3DSettings(Plot3DSettings):
@@ -277,8 +297,8 @@ class Stem3DSettings(Plot3DSettings):
         geometry: gpd.GeoSeries,
         *args,
         **kwargs,
-    ) -> None:
-        ax.stem(
+    ) -> StemContainer:
+        return ax.stem(
             geometry.x,
             geometry.y,
             geometry.z,
@@ -294,13 +314,15 @@ class Scatter3DSettings(Plot3DSettings):
         ax: Axes3D,
         geometry: gpd.GeoSeries,
         values: gpd.GeoSeries,
-    ) -> None:
-        ax.scatter(
+        **kwargs,
+    ) -> PathCollection:
+        return ax.scatter(
             geometry.x,
             geometry.y,
             geometry.z,
             c=values,
             **self.kwargs,
+            **kwargs,
         )
 
 
@@ -318,7 +340,7 @@ class InterplolationSettings3D(InterpolationDefaults3D):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -359,9 +381,12 @@ class Interpolated3DSettings(Scatter3DSettings, InterplolationSettings3D):
         ax: Axes3D,
         geometry: gpd.GeoSeries,
         values: gpd.GeoSeries,
-    ) -> None:
+        **kwargs,
+    ) -> PathCollection:
         data = self.interpolate_data(geometry, values)
-        super(Interpolated3DSettings, self).plot(ax, data.geometry, data.target)
+        return super(Interpolated3DSettings, self).plot(
+            ax, data.geometry, data.target, **kwargs
+        )
 
 
 class Contour3DDefaults(Plot3DSettings, InterplolationSettings3D):
@@ -373,7 +398,7 @@ class Contour3DDefaults(Plot3DSettings, InterplolationSettings3D):
     def _validate_limit_contours(cls, limit_contours: list[int] | range) -> list[int]:
         return list(limit_contours)
 
-    def plot(self, *args, **kwargs) -> None:
+    def plot(self, *args, **kwargs) -> list[Poly3DCollection]:
         raise NotImplementedError(
             f"Tried calling {__name__} method on {type(self).__name__} object"
         )
@@ -386,7 +411,7 @@ class Contour3DSettings(Contour3DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -397,16 +422,19 @@ class Contour3DSettings(Contour3DDefaults):
         ax: Axes3D,
         geometry: gpd.GeoSeries,
         values: gpd.GeoSeries,
-    ) -> None:
+        **kwargs,
+    ) -> list[Poly3DCollection]:
         data = self.interpolate_data(geometry, values)
         values = data.target
         if len(self.limit_contours) == 0:
             self.limit_contours = range(self.number_contours)
 
-        kwargs = self.kwargs.copy()
+        kwargs = merge_dicts(kwargs, self.kwargs.copy())
 
         colors = sns.color_palette(kwargs.pop("cmap"), n_colors=self.number_contours)
         data["category"] = pd.cut(values, bins=self.number_contours)
+
+        poly_paths: list[Poly3DCollection]
 
         for i, (color, category) in enumerate(
             zip(colors, data.category.cat.categories)
@@ -420,7 +448,9 @@ class Contour3DSettings(Contour3DDefaults):
                 sub_data.geometry.y.values,
                 sub_data.geometry.z.values,
             )
-            ax.plot_trisurf(X, Y, Z, color=color, **kwargs)
+            poly_paths.append(ax.plot_trisurf(X, Y, Z, color=color, **kwargs))
+
+        return poly_paths
 
 
 Plots3DUnion = Annotated[
@@ -495,7 +525,7 @@ class Axes3DSettings(Axes3DDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
                 data[field] = getattr(cls.DEFAULTS, field)
@@ -507,13 +537,18 @@ class Axes3DSettings(Axes3DDefaults):
         subplots: tuple[PositiveInt, PositiveInt],
         ax_index: PositiveInt,
         data: gpd.GeoDataFrame,
+        **kwargs,
     ) -> Axes3D:
         if self.crs_target:
             data = data.to_crs(self.crs_target)
 
         ax = fig.add_subplot(*subplots, ax_index, projection="3d", **self.kwargs)
         for plot_3d in self.plots.values():
-            plot_3d.plot(ax, data.geometry, data[self.target])
+            ret = plot_3d.plot(
+                ax, data.geometry, data[self.target], **kwargs, label=self.target
+            )
+            # if isinstance(plot_3d, Scatter3DSettings):
+            #     fig.colorbar(ret, ax=ax)
 
         ax.set_xlabel(self.xlabel)
         ax.set_ylabel(self.ylabel)
@@ -574,7 +609,7 @@ class FigureDefaults(BaseSettings):
         ret_data: list[AxesUnion] = []
         for axes_settings in data:
             if not isinstance(axes_settings, dict):
-                MODULE_LOGGER.verbose(
+                MODULE_LOGGER.verbose(  # type: ignore[attr-defined]
                     f"Directly adding {type(axes_settings).__name__}({axes_settings.model_dump()}) to subfigures"
                 )
                 ret_data.append(axes_settings)
@@ -623,7 +658,7 @@ class FigureDefaults(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")  # type: ignore[attr-defined]
         return data
 
     def validate_targets(self, values: list[str]) -> bool:
@@ -637,10 +672,10 @@ class FigureSettings(FigureDefaults):
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
         cls._validate_figure_settings(data)
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
-                data[field] = getattr(cls.DEFAULTS, field)
+                data[field] = copy.deepcopy(getattr(cls.DEFAULTS, field))
             if field in ["num_cols", "num_rows"] and data[field] < getattr(
                 cls.DEFAULTS, field
             ):
@@ -673,19 +708,47 @@ class FigureSettings(FigureDefaults):
         fig = plt.figure(**self.kwargs)
         subplots = (self.num_rows, self.num_cols)
 
+        fields = [
+            e
+            for e in data.columns.tolist()
+            if e not in ["geometry", "host", "hostname", "type"]
+        ]
+        minmax = data.loc[:, fields].agg(["min", "max"])
+
         axes: list[plt.Axes | Axes3D] = []
         axes3d: list[Axes3D] = []
+        cmap = "viridis"
+        label = ""
         for subfig_index, subfigure in enumerate(self.subfigures):
-            ax = subfigure.plot(fig, subplots, subfig_index + 1, data)
-            axes.append(ax)
             if isinstance(subfigure, Axes3DSettings):
+                vmin, vmax = minmax.loc[:, subfigure.target]
+                ax = subfigure.plot(
+                    fig, subplots, subfig_index + 1, data, vmin=vmin, vmax=vmax
+                )
+                last_3d_axes = ax
                 axes3d.append(ax)
+                cmap = subfigure.kwargs.get("cmap", cmap)
+                label = subfigure.target
+            else:
+                ax = subfigure.plot(fig, subplots, subfig_index + 1, data)
 
         # if len(axes3d) > 1:
         #     for ax3d in axes3d[1:]:
         #         axes3d[0].shareview(ax3d)
 
         self.annotate_figure(fig)
+
+        if len(axes3d) > 0:
+            vmin, vmax = minmax.loc[:, label]
+            fig.subplots_adjust(right=0.94)
+            cbar_ax = fig.add_axes([0.95, 0.02, 0.02, 0.925])
+            fig.colorbar(
+                plt.cm.ScalarMappable(
+                    cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax)
+                ),
+                cax=cbar_ax,
+                label=label,
+            )
 
         return fig
 
@@ -781,7 +844,7 @@ class OffsetFigureSettings(FigureSettings):
             ):
                 col_index = offset_index // self.num_cols_per_subfigure
                 subfigure.title = f"Offset: {offset} s{base_title}"
-                MODULE_LOGGER.verbose(
+                MODULE_LOGGER.verbose(  # type: ignore[attr-defined]
                     "Plotting subfigure %d, offset %d (%s) at index %d",
                     subfig_index,
                     offset_index,
@@ -836,6 +899,15 @@ class CorrelationCalcSettings(CorrelationCalcDefaults):
     """
 
     DEFAULTS: ClassVar[CorrelationCalcDefaults] = CorrelationCalcDefaults()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
+        for field in type(cls.DEFAULTS).model_fields:
+            if field not in data:
+                data[field] = copy.deepcopy(getattr(cls.DEFAULTS, field))
+        return data
 
     def calculate(self, data: gpd.GeoDataFrame) -> pd.DataFrame:
         return data[self.targets].corr()
@@ -896,6 +968,8 @@ class ExperimentDefaults(BaseSettings):
         required=False,
     )
 
+    rolling_window_period: int = Field(default=1, required=False)
+
     crs_target: Optional[str] = Field(default=None, required=False)
 
     output_file_template: Optional[str] = Field(default=None, required=False)
@@ -952,7 +1026,7 @@ class ExperimentDefaults(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")  # type: ignore[attr-defined]
         return data
 
 
@@ -975,17 +1049,22 @@ class ExperimentSettings(ExperimentDefaults):
     @model_validator(mode="before")
     @classmethod
     def _fill_model_defaults(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")
+        MODULE_LOGGER.verbose(f"Filling defaults in {cls.__name__}")  # type: ignore[attr-defined]
         for field in type(cls.DEFAULTS).model_fields:
             if field not in data:
-                data[field] = getattr(cls.DEFAULTS, field)
+                data[field] = copy.deepcopy(getattr(cls.DEFAULTS, field))
         return data
 
     @model_validator(mode="after")
-    def _format_figure_strings(self) -> "ExperimentDefaults":
+    def _format_figure_strings(self) -> "ExperimentSettings":
         MODULE_LOGGER.debug("Formatting figure strings...")
         for figure in self.figures:
-            figure.format_string_fields(**dict(experiment_name=self.experiment_name))
+            figure.format_string_fields(
+                **dict(
+                    experiment_name=self.experiment_name,
+                    rolling_window_period=self.rolling_window_period,
+                )
+            )
 
         return self
 
@@ -1041,7 +1120,7 @@ class ExperimentSettings(ExperimentDefaults):
 
     @staticmethod
     def _process_dataframe(data: pd.DataFrame) -> pd.DataFrame:
-        MODULE_LOGGER.verbose(
+        MODULE_LOGGER.verbose(  # type: ignore[attr-defined]
             "Processing dataframe\n%s", data.describe() if not data.empty else data
         )
         if data.empty:
@@ -1167,7 +1246,19 @@ class ExperimentSettings(ExperimentDefaults):
 
     @cached_property
     def cached_geo_data(self) -> gpd.GeoDataFrame:
-        return self.get_geo_data()
+        geo_data = self.get_geo_data()
+        for field in self.eval_field_names:
+            if field in ["mission_status"]:
+                continue
+            geo_data[field] = (
+                geo_data[field]
+                .rolling(window=f"{self.rolling_window_period}s", min_periods=1)
+                .mean()
+            )
+        geo_data.index = geo_data.index.map(
+            lambda x: (x - geo_data.index[0]).as_unit("s")
+        )
+        return geo_data
 
     def plot(self):
         figs = []
@@ -1182,6 +1273,7 @@ class ExperimentSettings(ExperimentDefaults):
                 filename = (
                     self.output_file_template.format(**figure.model_dump())
                     .replace(" ", "-")
+                    .replace("---", "-")
                     .lower()
                 )
                 path = Path(__file__).parent / filename
@@ -1211,9 +1303,6 @@ class EvaluationEnvelope(BaseSettings):
     path3d_defaults: Path3DSettings = Field(default=Path3DSettings())
     stem3d_defaults: Stem3DSettings = Field(default=Stem3DSettings())
     scatter3d_defaults: Scatter3DSettings = Field(default=Scatter3DSettings())
-    interpolation3d_defaults: InterpolationDefaults3D = Field(
-        default=InterpolationDefaults3D()
-    )
     interpolated3d_defaults: Interpolated3DSettings = Field(
         default=Interpolated3DSettings()
     )
@@ -1252,7 +1341,7 @@ class EvaluationEnvelope(BaseSettings):
     @field_validator("experiment_defaults")
     @classmethod
     def _set_experiment_defaults(cls, value: ExperimentDefaults) -> ExperimentDefaults:
-        MODULE_LOGGER.verbose("Setting experiment defaults")
+        MODULE_LOGGER.verbose("Setting experiment defaults")  # type: ignore[attr-defined]
         ExperimentSettings.DEFAULTS = value
         return value
 
@@ -1261,63 +1350,63 @@ class EvaluationEnvelope(BaseSettings):
     def _set_correlation_defaults(
         cls, value: CorrelationCalcDefaults
     ) -> CorrelationCalcDefaults:
-        MODULE_LOGGER.verbose("Setting correlation calculation defaults")
+        MODULE_LOGGER.verbose("Setting correlation calculation defaults")  # type: ignore[attr-defined]
         CorrelationCalcSettings.DEFAULTS = value
         return value
 
     @field_validator("figure_defaults")
     @classmethod
     def _set_figure_defaults(cls, value: FigureDefaults) -> FigureDefaults:
-        MODULE_LOGGER.verbose("Setting figure defaults")
+        MODULE_LOGGER.verbose("Setting figure defaults")  # type: ignore[attr-defined]
         FigureSettings.DEFAULTS = value
         return value
 
     @field_validator("axes3d_defaults")
     @classmethod
     def _set_axes3d_defaults(cls, value: Axes3DDefaults) -> Axes3DDefaults:
-        MODULE_LOGGER.verbose("Setting axes3D defaults")
+        MODULE_LOGGER.verbose("Setting axes3D defaults")  # type: ignore[attr-defined]
         Axes3DSettings.DEFAULTS = value
         return value
 
     @field_validator("axes2d_defaults")
     @classmethod
     def _set_axes2d_defaults(cls, value: Axes2DDefaults) -> Axes2DDefaults:
-        MODULE_LOGGER.verbose("Setting axes2D defaults")
+        MODULE_LOGGER.verbose("Setting axes2D defaults")  # type: ignore[attr-defined]
         Axes2DSettings.DEFAULTS = value
         return value
 
     @field_validator("twin_axes2d_defaults")
     @classmethod
     def _set_twin_axes2d_defaults(cls, value: TwinAxes2DDefaults) -> TwinAxes2DDefaults:
-        MODULE_LOGGER.verbose("Setting twin axes2D defaults")
+        MODULE_LOGGER.verbose("Setting twin axes2D defaults")  # type: ignore[attr-defined]
         TwinAxes2DSettings.DEFAULTS = value
         return value
 
     @field_validator("line2d_defaults")
     @classmethod
     def _set_line2d_defaults(cls, value: Line2DSettings) -> Line2DSettings:
-        MODULE_LOGGER.verbose("Setting line2D defaults")
+        MODULE_LOGGER.verbose("Setting line2D defaults")  # type: ignore[attr-defined]
         Line2DSettings.DEFAULT_DICT = value.kwargs
         return value
 
     @field_validator("path3d_defaults")
     @classmethod
     def _set_path3d_defaults(cls, value: Path3DSettings) -> Path3DSettings:
-        MODULE_LOGGER.verbose("Setting path3D defaults")
+        MODULE_LOGGER.verbose("Setting path3D defaults")  # type: ignore[attr-defined]
         Path3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
     @field_validator("stem3d_defaults")
     @classmethod
     def _set_stem3d_defaults(cls, value: Stem3DSettings) -> Stem3DSettings:
-        MODULE_LOGGER.verbose("Setting stem3D defaults")
+        MODULE_LOGGER.verbose("Setting stem3D defaults")  # type: ignore[attr-defined]
         Stem3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
     @field_validator("scatter3d_defaults")
     @classmethod
     def _set_scatter3d_defaults(cls, value: Scatter3DSettings) -> Scatter3DSettings:
-        MODULE_LOGGER.verbose("Setting scatter3D defaults")
+        MODULE_LOGGER.verbose("Setting scatter3D defaults")  # type: ignore[attr-defined]
         Scatter3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
@@ -1326,26 +1415,17 @@ class EvaluationEnvelope(BaseSettings):
     def _set_interpolated3d_defaults(
         cls, value: Interpolated3DSettings
     ) -> Interpolated3DSettings:
-        MODULE_LOGGER.verbose("Setting interpolated3D defaults")
+        MODULE_LOGGER.verbose("Setting interpolated3D defaults")  # type: ignore[attr-defined]
         Interpolated3DSettings.DEFAULTS = InterpolationDefaults3D(
             num_points=value.num_points, interpolation_method=value.interpolation_method
         )
         Interpolated3DSettings.DEFAULT_DICT = value.kwargs
         return value
 
-    @field_validator("interpolation3d_defaults")
-    @classmethod
-    def _set_interpolation3d_defaults(
-        cls, value: InterpolationDefaults3D
-    ) -> InterpolationDefaults3D:
-        MODULE_LOGGER.verbose("Setting interpolation3D defaults")
-        InterplolationSettings3D.DEFAULTS = value
-        return value
-
     @field_validator("contour3d_defaults")
     @classmethod
     def _set_contour3d_defaults(cls, value: Contour3DDefaults) -> Contour3DDefaults:
-        MODULE_LOGGER.verbose("Setting contour3D defaults")
+        MODULE_LOGGER.verbose("Setting contour3D defaults")  # type: ignore[attr-defined]
         Contour3DSettings.DEFAULT_DICT = value.kwargs
         Contour3DSettings.DEFAULTS = value
         return value
@@ -1353,7 +1433,7 @@ class EvaluationEnvelope(BaseSettings):
     @model_validator(mode="before")
     @classmethod
     def _debug_print(cls, data: dict[str, Any]) -> dict[str, Any]:
-        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")
+        MODULE_LOGGER.verbose(f"Creating {cls.__name__}: {data}")  # type: ignore[attr-defined]
         return data
 
 
@@ -1398,6 +1478,7 @@ def main():
     # Read settings
     eval_settings = EvaluationEnvelope()
     for experiment in eval_settings.experiments:
+        MODULE_LOGGER.info(f"Evaluate experiment: {experiment.experiment_name}")
         experiment.plot()
         for result in experiment.calculate():
             print(result)
