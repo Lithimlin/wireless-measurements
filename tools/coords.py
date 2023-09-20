@@ -1,5 +1,5 @@
 import json
-from itertools import groupby
+from itertools import filterfalse, groupby
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -59,14 +59,10 @@ class MissionPoints(BaseModel):
         self.points.extend(other.points)
 
     def keep(self, predicate: Callable[[MissionPoint], bool]) -> "MissionPoints":
-        return MissionPoints(
-            points=[point for point in self.points if predicate(point)]
-        )
+        return MissionPoints(points=filter(predicate, self.points))
 
     def drop(self, predicate: Callable[[MissionPoint], bool]) -> "MissionPoints":
-        return MissionPoints(
-            points=[point for point in self.points if not predicate(point)]
-        )
+        return MissionPoints(points=filterfalse(predicate, self.points))
 
 
 def generate_circular_3d_points(config: MissionConfig) -> MissionPoints:
