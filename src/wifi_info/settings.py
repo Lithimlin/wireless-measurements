@@ -86,7 +86,17 @@ class InfluxDBSettings(ServerSettings):
     @staticmethod
     def build_filters(tag: str, values: Iterable[str]) -> str:
         searches = " or ".join([f'r["{tag}"] == "{value}"' for value in values])
-        return f"|> filter(fn: (r) => {searches})"
+        return f"|> filter(fn: (r) => {searches})" if searches != "" else ""
+
+    @staticmethod
+    def build_false_filters(tag: str, values: Iterable[str]) -> str:
+        searches = " and ".join([f'r["{tag}"] != "{value}"' for value in values])
+        return f"|> filter(fn: (r) => {searches})" if searches != "" else ""
+
+    @staticmethod
+    def build_drop_columns(columns: Iterable[str]) -> str:
+        columns = map(lambda s: '"' + s + '"', columns)
+        return f"|> drop(columns: [{', '.join(columns)}])"
 
     def query_data_frame(self, query: str) -> DataFrame | list[DataFrame]:
         return self.query_api.query_data_frame(query, self.org)

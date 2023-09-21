@@ -15,6 +15,8 @@ from wifi_info.settings import InfluxDBSettings
 
 MODULE_LOGGER = module_logging.get_logger(module_logging.logging.INFO)
 
+DROP_COLUMNS = ["_start", "_stop", "_measurement", "table", "result"]
+
 
 class MigrationSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -56,8 +58,9 @@ class MigrationSettings(BaseSettings):
         query = self.source.build_query(
             self.start,
             self.end,
-            InfluxDBSettings.build_filters("_measurement", [measurement]),
-        )
+            InfluxDBSettings.build_filters("_measurement", [measurement])
+            + InfluxDBSettings.build_false_filters("_field", DROP_COLUMNS),
+        ) + InfluxDBSettings.build_drop_columns(DROP_COLUMNS)
         MODULE_LOGGER.debug("Query: %s", query)
         return self.source.query_data_frame(query)
 
@@ -90,6 +93,7 @@ class MigrationSettings(BaseSettings):
                     MODULE_LOGGER.warning("Datum is empty, but there may be more.")
                     continue
                 else:
+                    datum = datum.drop(DROP_COLUMNS, axis=1, errors="ignore")
                     MODULE_LOGGER.debug("\n%s", get_description(datum))
                     MODULE_LOGGER.debug("\n%s", datum.head(2))
                     self.write_data(datum, **kwargs)
@@ -99,6 +103,7 @@ class MigrationSettings(BaseSettings):
                 MODULE_LOGGER.warning("Data is empty.")
                 return
             else:
+                data = data.drop(DROP_COLUMNS, axis=1, errors="ignore")
                 MODULE_LOGGER.debug("\n%s", get_description(data))
                 MODULE_LOGGER.debug("\n%s", data.head(2))
                 self.write_data(data, **kwargs)
