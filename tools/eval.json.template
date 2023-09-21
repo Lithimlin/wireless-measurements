@@ -45,7 +45,8 @@
     "targets": [
       "bps",
       "rssi"
-    ]
+    ],
+    "filters": []
   },
   "axes3d_defaults": {
     "title": null,
@@ -120,9 +121,11 @@
     ],
     "num_cols": 1,
     "num_rows": 1,
+    "filters": [],
     "title": "{experiment_name}",
     "xlabel": "",
     "ylabel": "",
+    "norm": "linear",
     "tight_layout": true,
     "kwargs": {},
     "figure_name": ""
@@ -170,9 +173,11 @@
         ],
         "num_cols": 1,
         "num_rows": 1,
+        "filters": [],
         "title": "{experiment_name}",
         "xlabel": "",
         "ylabel": "",
+        "norm": "linear",
         "tight_layout": true,
         "kwargs": {},
         "figure_name": ""
@@ -204,9 +209,11 @@
         ],
         "num_cols": 1,
         "num_rows": 1,
+        "filters": [],
         "title": "{experiment_name}",
         "xlabel": "",
         "ylabel": "",
+        "norm": "linear",
         "tight_layout": true,
         "kwargs": {},
         "figure_name": ""
@@ -270,9 +277,11 @@
           ],
           "num_cols": 1,
           "num_rows": 1,
+          "filters": [],
           "title": "Example experiment",
           "xlabel": "",
           "ylabel": "",
+          "norm": "linear",
           "tight_layout": true,
           "kwargs": {},
           "figure_name": ""
@@ -304,9 +313,11 @@
           ],
           "num_cols": 1,
           "num_rows": 1,
+          "filters": [],
           "title": "Example experiment",
           "xlabel": "",
           "ylabel": "",
+          "norm": "linear",
           "tight_layout": true,
           "kwargs": {},
           "figure_name": ""
@@ -322,8 +333,8 @@
         "dpi": 300
       },
       "experiment_name": "Example experiment",
-      "start": "2023-09-20T10:52:10+0900",
-      "end": "2023-09-20T03:52:10+0200"
+      "start": "2023-09-21T13:34:30+0900",
+      "end": "2023-09-21T06:34:30+0200"
     }
   ]
 }

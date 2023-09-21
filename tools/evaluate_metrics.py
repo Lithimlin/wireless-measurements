@@ -9,7 +9,7 @@ from enum import StrEnum, auto
 from functools import cached_property
 from pathlib import Path
 from re import findall
-from typing import Annotated, Any, Callable, ClassVar, Iterable, Optional
+from typing import Annotated, Any, Callable, ClassVar, Iterable, Literal, Optional
 from zoneinfo import ZoneInfo
 
 import geopandas as gpd  # type: ignore[import]
@@ -21,10 +21,9 @@ import seaborn as sns  # type: ignore[import]
 from influxdb_client import InfluxDBClient  # type: ignore[import]
 from matplotlib.cm import ScalarMappable  # type: ignore[import]
 from matplotlib.collections import PathCollection  # type: ignore[import]
-from matplotlib.colors import Normalize  # type: ignore[import]
+from matplotlib.colors import LogNorm, Normalize  # type: ignore[import]
 from matplotlib.container import StemContainer  # type: ignore[import]
-from mpl_toolkits.mplot3d.art3d import Line3D  # type: ignore[import]
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from mpl_toolkits.mplot3d.art3d import Line3D, Poly3DCollection  # type: ignore[import]
 from mpl_toolkits.mplot3d.axes3d import Axes3D  # type: ignore[import]
 from pydantic import (
     Field,
@@ -547,8 +546,6 @@ class Axes3DSettings(Axes3DDefaults):
             ret = plot_3d.plot(
                 ax, data.geometry, data[self.target], **kwargs, label=self.target
             )
-            # if isinstance(plot_3d, Scatter3DSettings):
-            #     fig.colorbar(ret, ax=ax)
 
         ax.set_xlabel(self.xlabel)
         ax.set_ylabel(self.ylabel)
@@ -574,6 +571,8 @@ class FigureDefaults(BaseSettings):
     num_cols: PositiveInt = 1
     num_rows: PositiveInt = 1
 
+    filters: list[str] = Field(default=[], required=False)
+
     title: str = Field(
         default="{experiment_name}",
         required=False,
@@ -588,6 +587,12 @@ class FigureDefaults(BaseSettings):
         default="",
         required=False,
         description="Can be a format string",
+    )
+
+    norm: Literal["linear", "log"] = Field(
+        default="linear",
+        required=False,
+        description="Only affects the colorbar of 3D plots",
     )
 
     tight_layout: bool = Field(default=True, required=False)
@@ -635,6 +640,13 @@ class FigureDefaults(BaseSettings):
             ret_data.append(ret_settings)
         return ret_data
 
+    @field_validator("filters")
+    @classmethod
+    def _validate_filters(cls, filters: list[str]) -> list[str]:
+        if any("\n" in fil for fil in filters):
+            raise ValueError("Filters cannot contain newlines.")
+        return filters
+
     @model_validator(mode="before")
     @classmethod
     def _validate_figure_settings(cls, data: dict[str, Any]) -> dict[str, Any]:
@@ -663,6 +675,20 @@ class FigureDefaults(BaseSettings):
 
     def validate_targets(self, values: list[str]) -> bool:
         return all(subfigure.validate_targets(values) for subfigure in self.subfigures)
+
+    def filter_data(
+        self, data: pd.DataFrame | gpd.GeoDataFrame
+    ) -> pd.DataFrame | gpd.GeoDataFrame:
+        rows_before = len(data.index)
+        for fil in self.filters:
+            data = data[eval(fil)]
+        rows_after = len(data.index)
+        MODULE_LOGGER.verbose(  # type: ignore[attr-defined]
+            "Dropped %d rows due to set filters. %d rows remaining.",
+            rows_before - rows_after,
+            rows_after,
+        )
+        return data
 
 
 class FigureSettings(FigureDefaults):
@@ -705,6 +731,7 @@ class FigureSettings(FigureDefaults):
             fig.tight_layout()
 
     def plot(self, data: gpd.GeoDataFrame) -> plt.Figure:
+        data = self.filter_data(data)
         fig = plt.figure(**self.kwargs)
         subplots = (self.num_rows, self.num_cols)
 
@@ -721,9 +748,20 @@ class FigureSettings(FigureDefaults):
         label = ""
         for subfig_index, subfigure in enumerate(self.subfigures):
             if isinstance(subfigure, Axes3DSettings):
-                vmin, vmax = minmax.loc[:, subfigure.target]
+                vmin, vmax = minmax.loc[["min", "max"], subfigure.target]
+                match self.norm:
+                    case "linear":
+                        plot_norm = Normalize(vmin=vmin, vmax=vmax)
+                    case "log":
+                        if vmin == 0:
+                            vmin = 1
+                        plot_norm = LogNorm(vmin=vmin, vmax=vmax)
                 ax = subfigure.plot(
-                    fig, subplots, subfig_index + 1, data, vmin=vmin, vmax=vmax
+                    fig,
+                    subplots,
+                    subfig_index + 1,
+                    data,
+                    norm=plot_norm,
                 )
                 last_3d_axes = ax
                 axes3d.append(ax)
@@ -739,13 +777,24 @@ class FigureSettings(FigureDefaults):
         self.annotate_figure(fig)
 
         if len(axes3d) > 0:
-            vmin, vmax = minmax.loc[:, label]
-            fig.subplots_adjust(right=0.94)
-            cbar_ax = fig.add_axes([0.95, 0.02, 0.02, 0.925])
+            COLORBAR_WIDTH_IN = 1.0  # absolute width in inches
+
+            width, height = fig.get_size_inches()
+            right_adjust_frac = 1 - (COLORBAR_WIDTH_IN / width)
+            fig.subplots_adjust(right=right_adjust_frac)
+            cbar_ax = fig.add_axes(rect=(right_adjust_frac + 0.01, 0.02, 0.02, 0.925))
+
+            vmin, vmax = minmax.loc[["min", "max"], label]
+            match self.norm:
+                case "linear":
+                    bar_norm = Normalize(vmin=vmin, vmax=vmax)
+                case "log":
+                    if vmin == 0:
+                        vmin = 1
+                    bar_norm = LogNorm(vmin=vmin, vmax=vmax)
+
             fig.colorbar(
-                plt.cm.ScalarMappable(
-                    cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax)
-                ),
+                plt.cm.ScalarMappable(cmap=cmap, norm=bar_norm),
                 cax=cbar_ax,
                 label=label,
             )
@@ -884,6 +933,15 @@ FiguresUnion = Annotated[
 class CorrelationCalcDefaults(BaseSettings):
     targets: list[str] = Field(default=["bps", "rssi"], required=True, min_length=2)
 
+    filters: list[str] = Field(default=[], required=False)
+
+    @field_validator("filters")
+    @classmethod
+    def _validate_filters(cls, filters: list[str]) -> list[str]:
+        if any("\n" in fil for fil in filters):
+            raise ValueError("Filters cannot contain newlines.")
+        return filters
+
     def validate_targets(self, values: list[str]) -> bool:
         for target in self.targets:
             if target not in values:
@@ -891,6 +949,20 @@ class CorrelationCalcDefaults(BaseSettings):
                     f"Calculation target '{target}' must be a key of {values}"
                 )
         return True
+
+    def filter_data(
+        self, data: pd.DataFrame | gpd.GeoDataFrame
+    ) -> pd.DataFrame | gpd.GeoDataFrame:
+        rows_before = len(data.index)
+        for fil in self.filters:
+            data = data[eval(fil)]
+        rows_after = len(data.index)
+        MODULE_LOGGER.verbose(  # type: ignore[attr-defined]
+            "Dropped %d rows due to set filters. %d rows remaining.",
+            rows_before - rows_after,
+            rows_after,
+        )
+        return data
 
 
 class CorrelationCalcSettings(CorrelationCalcDefaults):
@@ -910,6 +982,7 @@ class CorrelationCalcSettings(CorrelationCalcDefaults):
         return data
 
     def calculate(self, data: gpd.GeoDataFrame) -> pd.DataFrame:
+        data = self.filter_data(data)
         return data[self.targets].corr()
 
 
@@ -1130,7 +1203,9 @@ class ExperimentSettings(ExperimentDefaults):
         data["_time"] = data["_time"].apply(floor_time)
         data = data.drop_duplicates(subset="_time")
         data = data.set_index("_time").drop(
-            ["result", "table", "_start", "_stop", "_measurement"], axis=1
+            ["result", "table", "_start", "_stop", "_measurement"],
+            axis=1,
+            errors="ignore",
         )
         return data
 
@@ -1161,7 +1236,8 @@ class ExperimentSettings(ExperimentDefaults):
         data = self.influxDB.query_data_frame(query)
 
         if isinstance(data, list):
-            raise ValueError("Got list of dataframes from iperf query")
+            data = pd.concat(data)
+            # raise ValueError("Got list of dataframes from iperf query")
 
         if FrameType.IPERF in self.retrieval_offsets:
             data["_time"] = data["_time"].apply(
@@ -1217,7 +1293,7 @@ class ExperimentSettings(ExperimentDefaults):
             data["alt"] = data["alt"] - data["alt"].min()
 
         rows_before = len(data.index)
-        data = data.dropna()
+        data = data.dropna(subset=self.gps_fields.keys())
         rows_after = len(data.index)
         MODULE_LOGGER.debug(
             "Dropped %d rows due to missing values. %d rows remaining.",
@@ -1500,7 +1576,7 @@ def main():
     with open(correlationsPath, "w") as file:
         json.dump(correlations, file, indent=2)
 
-    plt.show()
+    # plt.show()
 
 
 if __name__ == "__main__":
